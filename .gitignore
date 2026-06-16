@@ -10,6 +10,9 @@ __pycache__/
 venv/
 .ipynb_checkpoints/
 
+# Generated domain YAML preview dir (scripts/generate_api_domains.py default out-dir)
+build/
+
 # IDE / OS
 .vscode/
 .idea/

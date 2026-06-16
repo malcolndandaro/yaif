@@ -83,6 +83,61 @@ resources:
             - on-update-failure
             - on-update-fatal-failure
 
+    # --- Scaling past the per-pipeline table limit: shard across MULTIPLE PAIRS ---
+    # Databricks recommends <= 250 tables per ingestion pipeline (this is the
+    # feature-availability maximum too):
+    #   https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/sql-server-limits
+    #   ("Databricks recommends ingesting 250 or fewer tables per pipeline.")
+    #
+    # A gateway and an ingestion pipeline are a PAIR — the ingestion pipeline points at
+    # exactly one gateway via `ingestion_gateway_id`. To ingest more than ~250 tables you
+    # add MORE PAIRS, each handling a subset under the limit, all publishing into the SAME
+    # destination schema (yaif_sqlserver). The docs scale via separate gateway-ingestion
+    # *pairs*; they do NOT document one gateway feeding several ingestion pipelines, so
+    # give each ingestion pipeline its own gateway.
+    #
+    # Example: tables 1..250 go in the pair above; uncomment this second pair for 251..500
+    # (note the distinct resource keys + a distinct `gateway_storage_name`):
+    #
+    # sqlserver_gateway_2:
+    #   name: "[${bundle.target}] yaif-sqlserver-gateway-2"
+    #   serverless: true
+    #   catalog: ${var.catalog}
+    #   schema: ${resources.schemas.sqlserver_schema.name}
+    #   gateway_definition:
+    #     connection_name: ${var.sqlserver_connection}
+    #     gateway_storage_catalog: ${var.catalog}
+    #     gateway_storage_schema: ${resources.schemas.sqlserver_schema.name}
+    #     gateway_storage_name: sqlserver_gateway_storage_2   # must differ from pair #1
+    #
+    # sqlserver_ingestion_2:
+    #   name: "[${bundle.target}] yaif-sqlserver-2"
+    #   serverless: true
+    #   catalog: ${var.catalog}
+    #   schema: ${resources.schemas.sqlserver_schema.name}
+    #   ingestion_definition:
+    #     ingestion_gateway_id: ${resources.pipelines.sqlserver_gateway_2.id}   # this pair's gateway
+    #     objects:
+    #       # The NEXT subset of tables (keep each pipeline <= 250):
+    #       - table:
+    #           source_catalog: ${var.sqlserver_source_database}
+    #           source_schema: dbo
+    #           source_table: Invoices
+    #           destination_catalog: ${var.catalog}
+    #           destination_schema: ${resources.schemas.sqlserver_schema.name}
+    #       - table:
+    #           source_catalog: ${var.sqlserver_source_database}
+    #           source_schema: dbo
+    #           source_table: Shipments
+    #           destination_catalog: ${var.catalog}
+    #           destination_schema: ${resources.schemas.sqlserver_schema.name}
+    #   notifications:
+    #     - email_recipients:
+    #         - ${workspace.current_user.userName}
+    #       alerts:
+    #         - on-update-failure
+    #         - on-update-fatal-failure
+
   jobs:
     # Chains the triggered gateway then the ingestion pipeline — the repeatable
     # "pull latest changes" unit. Schedule it once a cadence is known.
@@ -98,6 +153,16 @@ resources:
             - task_key: gateway_capture
           pipeline_task:
             pipeline_id: ${resources.pipelines.sqlserver_ingestion.id}
+        # When sharding (uncomment the second pair above), add its tasks here too. The
+        # pairs are independent, so these can run in parallel with the first pair:
+        # - task_key: gateway_capture_2
+        #   pipeline_task:
+        #     pipeline_id: ${resources.pipelines.sqlserver_gateway_2.id}
+        # - task_key: ingest_apply_2
+        #   depends_on:
+        #     - task_key: gateway_capture_2
+        #   pipeline_task:
+        #     pipeline_id: ${resources.pipelines.sqlserver_ingestion_2.id}
       queue:
         enabled: true
       email_notifications:

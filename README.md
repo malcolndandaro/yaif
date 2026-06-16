@@ -15,6 +15,29 @@ just configures it.
 | `examples/sqlserver/` (move to `resources/sqlserver/` to activate) | SQL Server CDC | ✅ built & verified | Lakeflow Connect (gateway + ingestion pipeline) — pure config |
 | `src/files/` + `examples/files/` | Files in cloud storage (Parquet/CSV/JSON) — incl. SAP via a connector like Arcosoft | ✅ built & verified (demo) | Auto Loader (`cloudFiles`) reading a UC-governed Volume → SDP bronze/silver/gold |
 
+## Why would I use this?
+
+Because the alternative is a bespoke notebook per source — and that is exactly the
+thing that does not scale to dozens or hundreds of sources. YAIF gives every source
+the same governed, observable, environment-aware plumbing for free. Here is the API
+module versus a typical hand-rolled ingestion notebook:
+
+| Concern | Typical legacy notebook | YAIF API module |
+|---|---|---|
+| Auth | notebook context token / hardcoded | UC HTTP Connection (governed, audited, OAuth M2M capable) |
+| Distribution | serial loop or ad-hoc pandas_udf | `ThreadPoolExecutor` on the endpoint list |
+| Retries | manual / missing | tenacity, exp backoff, retries 5xx + transient |
+| Persistence | often discarded | UC managed Delta landing table |
+| Schema evolution | manual | Delta `mergeSchema=true` on append |
+| Orchestration | none | DABs job + SDP pipeline per domain |
+| Environments | hardcoded host | `targets: dev / prod` with overrides |
+| Observability | none | `gold_api_endpoint_health` MV (success rate, errors, body size) |
+| Failure alerting | none | Email notifications on job + pipeline failure |
+
+The other two modules (SQL Server, files) buy the same consistency without custom
+code — they just configure a managed Databricks primitive (Lakeflow Connect, Auto
+Loader) the same governed, dev/prod-aware way.
+
 ## Start here: you received YAIF — now what?
 
 YAIF exists to **accelerate ingestion onboarding** — to turn "we have hundreds of
@@ -82,7 +105,14 @@ yaif/
 │   └── api/                          # API module — one file per business domain
 │       ├── content_domain.yml        #   domain unit: schema + pipeline + job
 │       └── people_domain.yml         #   second domain — same pattern
+├── scripts/
+│   ├── generate_api_domains.py       # control table → one resources/api/<domain>.yml per domain
+│   └── README.md                     #   the control-table → generate → deploy round-trip
 ├── examples/
+│   ├── api/                          # API scaling helpers (outside the deploy glob)
+│   │   ├── control_table.csv         #   endpoints as a CSV (quick start / local)
+│   │   ├── control_table.sql         #   endpoints as a UC table (governed runtime source of truth)
+│   │   └── generated_sample/         #   committed example of one generated domain YAML
 │   ├── sqlserver/orders_cdc.yml      # Lakeflow Connect scaffold (outside include glob)
 │   └── files/erp_parquet.yml         # files-module domain unit (outside include glob; activate per feed)
 └── src/                              # SHARED module source — never copied per-domain
@@ -244,93 +274,74 @@ pipelines with `development: false` (full retries) and isolated schemas.
 
 ### Scale to hundreds/thousands of endpoints (worked example: 900 APIs)
 
-Two levers keep "900 APIs" from ever meaning 900 files or 900 redeploys:
+Two levers keep "900 APIs" from ever meaning 900 files or 900 redeploys — and both
+are **real files in this repo**, not pseudo-code:
 
-**Lever 1 — endpoints come from a control table (add an endpoint without redeploying).**
-Create one table, then have the fetch notebook read its domain's slice at runtime:
+**Lever 1 — one control table is the source of truth.** Every endpoint is one row,
+tagged with the business domain it belongs to. Two interchangeable forms, kept in
+sync (columns: `domain, endpoint_name, path, method, params, schedule, enabled`):
 
-```sql
-CREATE TABLE ${var.catalog}.config.api_endpoints (
-  domain STRING, endpoint STRING, enabled BOOLEAN
-);
--- INSERT one row per endpoint, tagged with the domain it belongs to.
+| Form | File | Use for |
+|---|---|---|
+| CSV | [`examples/api/control_table.csv`](examples/api/control_table.csv) | quick start / local — no workspace needed |
+| SQL | [`examples/api/control_table.sql`](examples/api/control_table.sql) | the governed Unity Catalog table (`<catalog>.config.api_endpoints`) |
+
+Adding, pausing, or removing an endpoint is an edit to this one table — never a code change.
+
+**Lever 2 — generate one domain YAML per domain from that table.** The script
+[`scripts/generate_api_domains.py`](scripts/generate_api_domains.py) reads the control
+table, groups enabled endpoints by domain, and emits one `resources/api/<domain>.yml`
+per domain — each byte-for-byte the same shape as the canonical `content_domain.yml`.
+No hand-copying, no framework code.
+
+```bash
+# From the CSV (no workspace needed):
+python scripts/generate_api_domains.py --csv examples/api/control_table.csv
+
+# ...or from the Unity Catalog control table:
+python scripts/generate_api_domains.py \
+  --table main.config.api_endpoints --warehouse-id <warehouse-id> [--profile <name>]
 ```
 
-```python
-# In src/jobs/fetch_api_responses.py, swap the api_endpoints widget read (~3 lines):
-DOMAIN = dbutils.widgets.get("domain")
-ENDPOINTS = [r.endpoint for r in
-    spark.read.table(f"{CATALOG}.config.api_endpoints")
-         .filter(f"enabled AND domain = '{DOMAIN}'").collect()]
+Output (run this, get that):
+
+```
+Reading control table from CSV: examples/api/control_table.csv
+  wrote build/generated_api/accounts.yml  (1 endpoints)
+  wrote build/generated_api/blog.yml  (2 endpoints)
+  wrote build/generated_api/gallery.yml  (2 endpoints)
+
+Done: read 5 enabled endpoints across 3 domains -> wrote 3 YAML files to build/generated_api/
+  (1 disabled row(s) skipped)
 ```
 
-Adding, pausing, or removing an endpoint is then an `INSERT`/`UPDATE` — no code, no deploy.
+The generator writes to a **preview** dir (`build/generated_api/`) — it never clobbers
+`resources/`. See exactly what one emitted file looks like at
+[`examples/api/generated_sample/blog.yml`](examples/api/generated_sample/blog.yml)
+(note the disabled `todos` row is dropped and the `postId=1` params row becomes
+`/comments?postId=1`). Review the YAML, move the domains you want into `resources/api/`,
+then deploy. (See [`scripts/README.md`](scripts/README.md) for the full round-trip.)
 
-**Lever 2 — generate the per-domain resources from a list (no hand-copying YAML).**
-One small script emits one `resources/api/<domain>.yml` per domain, mirroring
-`content_domain.yml`:
-
-```python
-# scripts/generate_api_domains.py  — run it, then `databricks bundle deploy`.
-from pathlib import Path
-
-DOMAINS = ["finance", "sales", "logistics", "hr", "inventory"]  # ...your ~45 domains
-
-TEMPLATE = """\
-resources:
-  schemas:
-    {d}_schema: {{catalog_name: ${{var.catalog}}, name: yaif_{d}}}
-  pipelines:
-    {d}_ingestion:
-      name: "[${{bundle.target}}] yaif-api-{d}"
-      catalog: ${{var.catalog}}
-      schema: ${{resources.schemas.{d}_schema.name}}
-      serverless: true
-      photon: true
-      libraries: [{{glob: {{include: ../../src/transformations/**}}}}]
-      configuration:
-        landing_table: "${{var.catalog}}.${{resources.schemas.{d}_schema.name}}.raw_api_responses"
-  jobs:
-    {d}_fetch_and_pipeline:
-      name: "[${{bundle.target}}] yaif-api-{d}"
-      tasks:
-        - task_key: fetch
-          notebook_task:
-            notebook_path: ../../src/jobs/fetch_api_responses.py
-            base_parameters:
-              api_connection: ${{var.api_connection}}
-              domain: "{d}"        # notebook reads this domain's endpoints from the control table
-              landing_table: "${{var.catalog}}.${{resources.schemas.{d}_schema.name}}.raw_api_responses"
-              request_concurrency: ${{var.request_concurrency}}
-          environment_key: fetch_env
-        - task_key: run_pipeline
-          depends_on: [{{task_key: fetch}}]
-          pipeline_task: {{pipeline_id: ${{resources.pipelines.{d}_ingestion.id}}}}
-      environments:
-        - environment_key: fetch_env
-          spec: {{client: "2", dependencies: ["tenacity>=8.2.0", "databricks-sdk>=0.50.0"]}}
-"""
-
-for d in DOMAINS:
-    Path(f"resources/api/{d}.yml").write_text(TEMPLATE.format(d=d))
-    print("wrote", d)
-```
-
-(Abbreviated for the README — copy the `notifications` / `permissions` / `queue`
-blocks from `content_domain.yml` for the full production template, or generate with
-[Python for DABs](https://docs.databricks.com/dev-tools/bundles/python).)
+> **Optional — skip regenerating when you only change endpoints.** Instead of baking
+> `api_endpoints` into each YAML, you can have the fetch job read its domain's slice
+> from the control table at runtime (pass a `domain` parameter and
+> `spark.read.table("<catalog>.config.api_endpoints").filter("enabled AND domain = …")`).
+> Then adding an endpoint is a pure `INSERT`, no redeploy. The generator path above is
+> the simpler default; this is the trade-up when endpoint churn is high.
 
 **The 900-endpoint run, end to end:**
 
-1. Load all 900 endpoints into `config.api_endpoints`, each tagged with its domain
+1. Load all 900 endpoints into the control table, each tagged with its domain
    (≈45 domains × ≈20 endpoints — group by team / freshness SLA: `finance`, `sales`, …).
-2. Put those ~45 domain names in `DOMAINS` and run the generator → 45 YAML files.
-3. `databricks bundle deploy -t dev` → 45 isolated pipelines + 45 jobs created.
+2. Run `python scripts/generate_api_domains.py --table <catalog>.config.api_endpoints
+   --warehouse-id <id>` → ~45 YAML files in `build/generated_api/`.
+3. Move them into `resources/api/`, add each pipeline's `development:` override to the
+   dev/prod targets, then `databricks bundle deploy -t dev` → ~45 isolated pipelines + jobs.
 4. Stagger each job's schedule and ramp `request_concurrency` per
    `gold_api_endpoint_health`; promote with `-t prod`.
 
-Framework code written: **zero**. Adding endpoints later = `INSERT`s; adding a whole
-domain = one line in `DOMAINS` + redeploy.
+Framework code written: **zero**. Adding endpoints later = edit the control table +
+re-run the generator (or just `INSERT` if you adopt the runtime-read option above).
 
 ## Playbook B — SQL Server (CDC via Lakeflow Connect)
 
@@ -360,6 +371,18 @@ the deploy glob because it needs a live connection.
 Onboard more tables: add `table:` blocks (or one `schema:` block) to `objects:` and
 redeploy — no new code. **Cost note:** the gateway runs *continuously* once deployed
 and bills until stopped — `databricks pipelines stop <gateway-id>` when idle.
+
+**Table-count limit & sharding (verified against the docs).** Databricks recommends
+**≤ 250 tables per ingestion pipeline** ([SQL Server connector limitations](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/sql-server-limits)
+— "Databricks recommends ingesting 250 or fewer tables per pipeline"; the
+feature-availability table lists 250 as the maximum). A gateway and an ingestion
+pipeline form a **pair** — the ingestion pipeline references exactly one gateway via
+`ingestion_gateway_id` — so to go beyond ~250 tables you split the table list across
+**multiple gateway-ingestion pairs**, each pair under the limit and all publishing into
+the same `yaif_sqlserver` schema. The commented second pair in
+`examples/sqlserver/orders_cdc.yml` shows the split. (Note: the docs describe scaling
+via separate gateway-ingestion *pairs*, not one gateway feeding many ingestion
+pipelines.)
 
 ## Playbook C — Files in cloud storage (Auto Loader)
 
@@ -434,20 +457,6 @@ comparisons.
 > (older DBR, missing privilege), swap the `get_with_retry` block for a plain
 > `requests.Session` with `Authorization: Bearer {dbutils.secrets.get(scope, key)}` —
 > the landing table contract and the SDP pipeline are identical either way.
-
-## What's different from a hand-rolled ingestion notebook
-
-| Concern | Typical legacy notebook | YAIF API module |
-|---|---|---|
-| Auth | notebook context token / hardcoded | UC HTTP Connection (governed, audited, OAuth M2M capable) |
-| Distribution | serial loop or ad-hoc pandas_udf | `ThreadPoolExecutor` on the endpoint list |
-| Retries | manual / missing | tenacity, exp backoff, retries 5xx + transient |
-| Persistence | often discarded | UC managed Delta landing table |
-| Schema evolution | manual | Delta `mergeSchema=true` on append |
-| Orchestration | none | DABs job + SDP pipeline per domain |
-| Environments | hardcoded host | `targets: dev / prod` with overrides |
-| Observability | none | `gold_api_endpoint_health` MV (success rate, errors, body size) |
-| Failure alerting | none | Email notifications on job + pipeline failure |
 
 > Agent/contributor notes — the dev/prod target conventions and the hard-won
 > gotchas baked into these templates now live in `CLAUDE.md` (see "Gotchas that

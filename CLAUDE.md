@@ -167,12 +167,27 @@ yaif/
 7. Paths in `resources/<module>/*.yml` are relative to the YAML file. The files live
    one level deep under `resources/<module>/`, so they use `../../src/...` (two
    levels), not `../src/...`. If you add a new module subdir, match this.
+8. **Lakeflow Connect SQL Server: ≤250 tables per ingestion pipeline.** Databricks'
+   verified recommendation / feature-availability maximum is 250 tables *per ingestion
+   pipeline* (https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/sql-server-limits
+   — "Databricks recommends ingesting 250 or fewer tables per pipeline"). A gateway and
+   an ingestion pipeline are a PAIR — the ingestion pipeline references exactly one
+   gateway via `ingestion_gateway_id`. To exceed ~250 tables, shard the table list
+   across **multiple gateway-ingestion pairs** publishing into the same schema; the docs
+   do NOT document one gateway feeding many ingestion pipelines, so don't assume it.
+   The commented second pair in `examples/sqlserver/orders_cdc.yml` shows the split.
 
 ## How to onboard a new API domain
 
 Copy `resources/api/content_domain.yml` -> rename resource keys + schema name + job
-name, set `api_endpoints`, deploy. ~60 lines of YAML, zero code change. Beyond ~20
-domains, generate resources via Python for DABs instead of hand-copying.
+name, set `api_endpoints`, deploy. ~60 lines of YAML, zero code change. Beyond a
+handful of domains, don't hand-copy: keep all endpoints in a control table
+(`examples/api/control_table.csv` for local, or the UC table in
+`examples/api/control_table.sql`) and generate one domain YAML per domain with
+`scripts/generate_api_domains.py` (it writes to a preview dir `build/generated_api/`,
+NOT `resources/` — review, then move the files you want into `resources/api/` and
+deploy). A committed sample of the generated output is at
+`examples/api/generated_sample/blog.yml`.
 
 ## Related
 
