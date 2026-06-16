@@ -4,11 +4,20 @@ Context for AI agents working in this repo. Read this first.
 
 ## What this is
 
-YAIF is a **customer-agnostic, reusable Databricks ingestion umbrella repo**. It is
-an Asset Bundle (DAB) holding independent ingestion modules per source type that
-share conventions (naming, medallion structure, dev/prod targets, monitoring) but
-**no code abstraction**. The full user-facing guide is in `README.md` — read it for
-the onboarding flow, design rationale, and verified results.
+YAIF (Yet Another Ingestion Framework) is a **config-driven framework to accelerate
+ingestion at scale** on the Databricks Lakehouse — a customer-agnostic, reusable
+Asset Bundle (DAB). The goal: turn "we have hundreds of sources to land in the
+lakehouse" into a repeatable, *copy-one-file-per-source* (or one-row-in-a-control-
+table) workflow instead of a bespoke notebook per source. The motivating case is a
+customer with **~900 REST APIs**: you never hand-build 900 jobs — you group endpoints
+into ~45 domains, drive the endpoint lists from a control table, and **generate** the
+per-domain resources. Onboarding a source writes **zero** new framework code.
+
+It holds independent ingestion modules per source type that share conventions
+(naming, medallion structure, dev/prod targets, monitoring) but **no code
+abstraction**. The full user-facing guide is in `README.md` — read it for the
+onboarding flow, the 900-API scaling playbook, and the per-module playbooks.
+Verified end-to-end results live in **Current status** below.
 
 **Origin & ownership:** built by Malcoln Dandaro (Databricks SSA). It is deliberately
 scrubbed of all customer references so it can be reused with any customer. Do not
@@ -25,6 +34,27 @@ connector in custom Python. The API module has real code because raw REST fan-ou
 needs it; the SQL Server module is pure Lakeflow Connect YAML. If you're tempted to
 build a "unified ingestion metadata layer," stop — that's the anti-pattern this repo
 was explicitly designed against.
+
+## Repo conventions (follow these when adding anything)
+
+- **Shared code lives in `src/`, never copied per-feed.** `src/jobs/` (Python job
+  tasks), `src/transformations/` (API SDP medallion source), `src/files/` (files SDP
+  medallion source). A new domain/feed reuses this code unchanged — if you find
+  yourself copying a `src/` file per domain, you're doing it wrong.
+- **One deployable unit per feed = one domain YAML.** Each
+  `resources/<module>/<feed>.yml` is a self-contained schema + pipeline + job.
+  Onboarding a feed is a file copy + a few field edits, never a code change.
+- **`resources/*/*.yml` is the deploy glob** (note the module-subdir level — files sit
+  one dir deep under `resources/<module>/`). Anything matching it deploys on
+  `bundle deploy`.
+- **Modules that need external setup live in `examples/`, OUTSIDE the glob, and are
+  "activated by moving."** A feed that depends on infra that may not exist yet (a UC
+  `SQLSERVER` connection, a UC external location) would fail `bundle validate`/`deploy`
+  if it were globbed. Its template lives in `examples/<module>/`; activate it by
+  creating the prerequisite, setting the relevant vars, and moving the file into
+  `resources/<module>/`. Never move one into the glob without its external prerequisite
+  in place. (The files module ships a self-contained demo, `resources/files/demo.yml`,
+  that IS in the glob because it needs no external setup — a managed volume + seeder.)
 
 ## Repo layout
 
@@ -111,7 +141,7 @@ yaif/
 - Private-network sources (no public egress) need serverless network connectivity
   (NCC / PrivateLink) configured on the workspace before the gateway can reach them.
 
-## Gotchas that WILL bite you (all learned the hard way; also in README)
+## Gotchas that WILL bite you (all learned the hard way — CLAUDE.md is their canonical home)
 
 1. `development: true` belongs in **target overrides** in `databricks.yml`, never in
    the pipeline resource — else prod runs in dev mode with retries off.
@@ -146,5 +176,5 @@ domains, generate resources via Python for DABs instead of hand-copying.
 
 ## Related
 
-- See `README.md` for the full onboarding guide, design rationale, and verified
-  results across all three modules.
+- See `README.md` for the full onboarding guide, design rationale, the 900-API
+  scaling playbook, and the per-module playbooks (A: API, B: SQL Server, C: files).

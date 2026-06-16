@@ -351,7 +351,7 @@ the deploy glob because it needs a live connection.
    (one `table:` block each, or a single `schema:` block for a whole schema).
 4. **Activate:** move `examples/sqlserver/orders_cdc.yml` → `resources/sqlserver/`,
    and add the `sqlserver_ingestion` `development:` override to the dev/prod targets
-   (gotcha #1).
+   (the `development:` flag belongs in the target override, never the pipeline resource).
 5. **Deploy & run:** `databricks bundle deploy && databricks bundle run sqlserver_ingestion_job`
    — the job chains gateway capture → ingestion apply.
 6. **Verify** with any SQL warehouse:
@@ -398,7 +398,8 @@ domain unit is `examples/files/erp_parquet.yml`. Data flow:
    not Parquet).
 3. Move `examples/files/erp_parquet.yml` → `resources/files/erp_parquet.yml`
    (this is what brings it into the deploy glob), and add the `erp_ingestion`
-   `development:` override to the dev/prod targets (gotcha #1).
+   `development:` override to the dev/prod targets (the `development:` flag belongs
+   in the target override, never the pipeline resource).
 4. `databricks bundle deploy && databricks bundle run erp_ingestion_job`.
 5. **Verify** with any SQL warehouse:
    `SELECT count(*), count(DISTINCT source_file) FROM <catalog>.yaif_erp.bronze_cloud_files;`
@@ -448,48 +449,6 @@ comparisons.
 | Observability | none | `gold_api_endpoint_health` MV (success rate, errors, body size) |
 | Failure alerting | none | Email notifications on job + pipeline failure |
 
-## Verified results (2026-06-12)
-
-Both demo domains deployed and run **in parallel**, each through the UC
-connection, each with an isolated medallion in its own schema:
-
-| Domain | Raw | Bronze | Silver | Expected silver |
-|---|---|---|---|---|
-| content (`yaif_content`) | 4 | 4 | 5,700 | 100 posts + 500 comments + 100 albums + 5,000 photos ✓ |
-| people (`yaif_people`) | 2 | 2 | 210 | 10 users + 200 todos ✓ |
-
-Earlier runs additionally verified: incremental streaming across 3 consecutive
-runs (bronze processed only new batches), success_rate 1.0 on all endpoints, and
-1MB payloads byte-identical through the UC connection proxy.
-
-**Files module (Auto Loader), verified 2026-06-15** via the self-contained demo
-(`resources/files/demo.yml` + synthetic seeder — no external bucket needed,
-`databricks bundle run files_demo_seed_and_pipeline`):
-
-| Layer | Count | Expected |
-|---|---|---|
-| `bronze_cloud_files` | 100 | 100 rows across 2 Parquet drops ✓ |
-| `silver_cloud_files` | 100 | passthrough (no `dedup_keys` set) ✓ |
-| `gold_files_ingestion_health` | 2 files / 100 rows / 202,940 bytes | source-file lineage + freshness populated ✓ |
-
-This proves the same Auto Loader → SDP medallion that a real Arcosoft/SAP Parquet
-feed uses, with the only difference being a MANAGED demo volume vs. an EXTERNAL
-volume on the real bucket.
-
-## Gotchas baked into this template (learned the hard way)
-
-1. `development: true` lives in **target overrides**, not the pipeline resource —
-   otherwise prod runs in dev mode with retries disabled.
-2. Pipeline `schema:` references `${resources.schemas.<key>.name}` — dev mode
-   prefixes schema names, so a plain variable points at the wrong schema.
-3. SDP expectations evaluate against the **output** dataframe — they can only
-   reference columns that survive the final `select`.
-4. Landing API payloads straight into a Delta table beats Volume + Auto Loader
-   here — no empty-dir schema-inference failures, one less hop.
-5. Serverless preinstalls `databricks-sdk` — a dependency floor the preinstalled
-   version already satisfies is silently skipped by pip. Pin a floor **newer**
-   than the preinstalled version (`>=0.50.0`) or `http_request` won't exist.
-6. The enum `ExternalFunctionRequestHttpMethod` moves between SDK versions — the
-   fetch notebook imports it with a plain-string fallback.
-7. Paths in `resources/<module>/*.yml` are relative to the YAML file — moving a
-   resource file one level deeper means `../src/` becomes `../../src/`.
+> Agent/contributor notes — the dev/prod target conventions and the hard-won
+> gotchas baked into these templates now live in `CLAUDE.md` (see "Gotchas that
+> WILL bite you"). Read it before changing a pipeline, job, or path in this repo.
