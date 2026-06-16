@@ -1,8 +1,8 @@
 # YAIF module: SQL Server CDC via Lakeflow Connect (managed connector)
 #
-# Verified end-to-end against SQL Server 2022: a triggered gateway snapshots and
-# captures changes (CDC / Change Tracking) into staging, and an ingestion pipeline
-# applies them into Unity Catalog tables.
+# Verified end-to-end against SQL Server 2022: a CONTINUOUS gateway snapshots and
+# captures changes (CDC / Change Tracking) into staging, and a TRIGGERED ingestion
+# pipeline applies them into Unity Catalog tables.
 #
 # This file is OUTSIDE the bundle include glob (resources/*/*.yml) on purpose: the
 # gateway needs a real UC SQLSERVER connection, so leaving it in the glob would block
@@ -10,21 +10,30 @@
 # same way you onboard an API domain:
 #
 #   1. Create the UC connection to your SQL Server (admin, one-time). Credentials live
-#      in the connection — never in this file:
+#      in the connection — never in this file. Use a DEDICATED LEAST-PRIVILEGE login
+#      (only the CT/CDC read grants the connector needs), never SA / db_owner:
 #        CREATE CONNECTION sqlserver_conn TYPE SQLSERVER
-#        OPTIONS (host '<host>', port '1433', user '<user>', password '<password>',
+#        OPTIONS (host '<host>', port '1433', user '<lfc_reader>', password '<password>',
 #                 trustServerCertificate 'true');
+#      (trustServerCertificate 'true' is LAB-ONLY — it skips server-cert validation.
+#       For prod, drop it or pin the CA so the gateway verifies the server's TLS cert.)
 #   2. Enable CDC or Change Tracking on the source database/tables (ask your DBA).
 #   3. Set the variables in databricks.yml: `sqlserver_connection` and
 #      `sqlserver_source_database`.
-#   4. Move this file to resources/sqlserver/ and add the dev/prod `development:`
-#      overrides for `sqlserver_ingestion` (gotcha #1).
-#   5. databricks bundle deploy && databricks bundle run sqlserver_ingestion_job
+#   4. Move this file to resources/sqlserver/ (no databricks.yml edits — the target mode
+#      sets each pipeline's `development` flag; see gotcha #1).
+#   5. Deploy, start the CONTINUOUS gateway once, then run (and schedule) the ingestion job:
+#        databricks bundle deploy
+#        databricks bundle run sqlserver_gateway          # starts the continuous gateway
+#        databricks bundle run sqlserver_ingestion_job    # triggers the ingestion apply
 #
 # No custom code — Lakeflow Connect is the managed framework; YAIF contributes only
 # conventions (schema-per-module, naming, targets, monitoring).
 #
-# Flow:  gateway (snapshot + change capture -> staging)  ->  ingestion (apply -> UC tables)
+# Flow:  gateway (CONTINUOUS: snapshot + change capture -> staging)
+#          ->  ingestion (TRIGGERED: apply staged changes -> UC tables)
+# The gateway -> ingestion staging Volume keeps change data ~30 days by default;
+# reprocessing further back than that requires a resnapshot of the affected tables.
 resources:
   schemas:
     sqlserver_schema:
@@ -34,11 +43,17 @@ resources:
 
   pipelines:
     # Gateway: connects to SQL Server, snapshots tables and captures changes into
-    # staging tables under the gateway storage schema. Triggered (not continuous)
-    # so an automated run completes instead of running forever.
+    # staging tables under the gateway storage schema. It MUST run CONTINUOUSLY —
+    # Databricks docs: "You must run the gateway as a continuous pipeline." If it stops
+    # long enough for the source's change log to truncate, the affected tables need a
+    # full refresh. It bills classic-compute DBUs until stopped, so in a lab you can stop
+    # it (`databricks pipelines stop <gateway-id>`); in prod, leave it running. The
+    # scheduled job below triggers ONLY the ingestion pipeline, never this gateway.
+    # Docs: https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/sql-server-pipeline
     sqlserver_gateway:
       name: "[${bundle.target}] yaif-sqlserver-gateway"
       serverless: true
+      continuous: true   # gateway runs continuously to stage change events (required)
       catalog: ${var.catalog}
       schema: ${resources.schemas.sqlserver_schema.name}
       gateway_definition:
@@ -48,10 +63,13 @@ resources:
         gateway_storage_name: sqlserver_gateway_storage
 
     # Ingestion: reads the gateway's staging area and applies changes into UC
-    # tables (SCD type 1 by default) in the destination schema.
+    # tables (SCD type 1 by default) in the destination schema. Lakeflow Connect
+    # ingestion is TRIGGERED-only (continuous mode is rejected) — the scheduled job
+    # below drives its cadence.
     sqlserver_ingestion:
       name: "[${bundle.target}] yaif-sqlserver"
       serverless: true
+      continuous: false   # triggered; the job (or a pipeline schedule) sets the cadence
       catalog: ${var.catalog}
       schema: ${resources.schemas.sqlserver_schema.name}
       ingestion_definition:
@@ -102,6 +120,7 @@ resources:
     # sqlserver_gateway_2:
     #   name: "[${bundle.target}] yaif-sqlserver-gateway-2"
     #   serverless: true
+    #   continuous: true   # each pair's gateway runs continuously
     #   catalog: ${var.catalog}
     #   schema: ${resources.schemas.sqlserver_schema.name}
     #   gateway_definition:
@@ -113,6 +132,7 @@ resources:
     # sqlserver_ingestion_2:
     #   name: "[${bundle.target}] yaif-sqlserver-2"
     #   serverless: true
+    #   continuous: false   # triggered by the job
     #   catalog: ${var.catalog}
     #   schema: ${resources.schemas.sqlserver_schema.name}
     #   ingestion_definition:
@@ -139,28 +159,23 @@ resources:
     #         - on-update-fatal-failure
 
   jobs:
-    # Chains the triggered gateway then the ingestion pipeline — the repeatable
-    # "pull latest changes" unit. Schedule it once a cadence is known.
+    # Triggers ONLY the ingestion pipeline on a cadence — the repeatable "apply the
+    # latest staged changes" unit. The gateway is CONTINUOUS (above) and is deliberately
+    # NOT a job task: it captures into staging on its own; this job applies what's been
+    # staged. This is the canonical Lakeflow Connect pattern (schedule the triggered
+    # ingestion pipeline; never schedule the continuous gateway).
+    # Docs: https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/sql-server-pipeline
     sqlserver_ingestion_job:
       name: "[${bundle.target}] yaif-sqlserver"
-      description: "SQL Server CDC: gateway snapshot/capture -> ingestion apply into UC"
+      description: "SQL Server CDC: apply staged changes (ingestion pipeline) into UC"
       tasks:
-        - task_key: gateway_capture
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.sqlserver_gateway.id}
         - task_key: ingest_apply
-          depends_on:
-            - task_key: gateway_capture
           pipeline_task:
             pipeline_id: ${resources.pipelines.sqlserver_ingestion.id}
-        # When sharding (uncomment the second pair above), add its tasks here too. The
-        # pairs are independent, so these can run in parallel with the first pair:
-        # - task_key: gateway_capture_2
-        #   pipeline_task:
-        #     pipeline_id: ${resources.pipelines.sqlserver_gateway_2.id}
+        # When sharding (uncomment the second pair above), add its ingestion task here
+        # too — each pair's gateway stays continuous and separate, so the job triggers
+        # only the ingestion halves (they run in parallel):
         # - task_key: ingest_apply_2
-        #   depends_on:
-        #     - task_key: gateway_capture_2
         #   pipeline_task:
         #     pipeline_id: ${resources.pipelines.sqlserver_ingestion_2.id}
       queue:

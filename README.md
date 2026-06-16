@@ -248,7 +248,10 @@ Why this shape:
 - **Failure isolation** — a broken API in one domain never blocks the others
 - **Independent schedules** — each domain job gets its own cron + concurrency
 - **Per-team governance** — grants on the domain schema and connection; each
-  medallion (bronze/silver/gold) lives in its domain schema
+  medallion (bronze/silver/gold) lives in its domain schema. Pipeline/job `CAN_VIEW`
+  grants are driven by the `viewers_group` variable (default `users` for the demo);
+  override it globally, per target, or per-domain (set a domain's own team group in
+  its `resources/*/*.yml`) to realize true per-team visibility
 - **Rate-limit budgeting** — the sum of `request_concurrency` across jobs that
   overlap in schedule must stay under the gateway limit; stagger crons
 
@@ -269,8 +272,8 @@ databricks bundle run content_fetch_and_pipeline -t dev   # one command per doma
 # Stagger crons across domains sharing a gateway.
 ```
 
-**5. Promote to prod:** `databricks bundle deploy -t prod` — prod target runs
-pipelines with `development: false` (full retries) and isolated schemas.
+**5. Promote to prod:** `databricks bundle deploy -t prod` — `mode: production` marks
+every pipeline `development: false` (full retries) and validates it, with isolated schemas.
 
 ### Scale to hundreds/thousands of endpoints (worked example: 900 APIs)
 
@@ -335,8 +338,9 @@ then deploy. (See [`scripts/README.md`](scripts/README.md) for the full round-tr
    (≈45 domains × ≈20 endpoints — group by team / freshness SLA: `finance`, `sales`, …).
 2. Run `python scripts/generate_api_domains.py --table <catalog>.config.api_endpoints
    --warehouse-id <id>` → ~45 YAML files in `build/generated_api/`.
-3. Move them into `resources/api/`, add each pipeline's `development:` override to the
-   dev/prod targets, then `databricks bundle deploy -t dev` → ~45 isolated pipelines + jobs.
+3. Move them into `resources/api/`, then `databricks bundle deploy -t dev` → ~45 isolated
+   pipelines + jobs. No `databricks.yml` edits: the target `mode` (`development`/`production`)
+   sets each pipeline's `development` flag automatically — onboarding is a pure file copy.
 4. Stagger each job's schedule and ramp `request_concurrency` per
    `gold_api_endpoint_health`; promote with `-t prod`.
 
@@ -357,20 +361,38 @@ the deploy glob because it needs a live connection.
             trustServerCertificate 'true');
    GRANT USE CONNECTION ON CONNECTION sqlserver_conn TO `data-engineers`;
    ```
+   Use a **dedicated least-privilege login** for `<user>` — only the CT/CDC read grants the
+   connector needs, never `SA`/`db_owner` (that broad role is for a DBA enabling CDC, not
+   steady-state reads). `trustServerCertificate 'true'` disables server-cert validation, which
+   is fine for a lab; **for prod, validate TLS** — drop the option (or pin the CA) so the
+   gateway verifies the server certificate.
 3. **Set the variables** in `databricks.yml`: `sqlserver_connection` and
    `sqlserver_source_database`. List your tables in the example's `objects:` block
    (one `table:` block each, or a single `schema:` block for a whole schema).
-4. **Activate:** move `examples/sqlserver/orders_cdc.yml` → `resources/sqlserver/`,
-   and add the `sqlserver_ingestion` `development:` override to the dev/prod targets
-   (the `development:` flag belongs in the target override, never the pipeline resource).
-5. **Deploy & run:** `databricks bundle deploy && databricks bundle run sqlserver_ingestion_job`
-   — the job chains gateway capture → ingestion apply.
+4. **Activate:** move `examples/sqlserver/orders_cdc.yml` → `resources/sqlserver/`
+   (no `databricks.yml` edits — the target `mode` sets each pipeline's `development` flag).
+5. **Deploy, start the gateway, run ingestion:** `databricks bundle deploy`, then start the
+   **continuous gateway** once — `databricks bundle run sqlserver_gateway` — which runs
+   continuously, capturing changes into staging. Trigger applies with
+   `databricks bundle run sqlserver_ingestion_job` (or schedule that job). The job triggers
+   **only** the ingestion pipeline — the gateway is continuous and is *not* a job task
+   ([SQL Server ingestion docs](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/sql-server-pipeline):
+   *"You must run the gateway as a continuous pipeline"*; the scheduled job targets only the
+   ingestion pipeline).
 6. **Verify** with any SQL warehouse:
    `SELECT count(*) FROM <catalog>.yaif_sqlserver.<table>;`
 
 Onboard more tables: add `table:` blocks (or one `schema:` block) to `objects:` and
-redeploy — no new code. **Cost note:** the gateway runs *continuously* once deployed
-and bills until stopped — `databricks pipelines stop <gateway-id>` when idle.
+redeploy — no new code.
+
+**Cost & ops notes:**
+- **The gateway is continuous** — once started it runs (and bills classic-compute DBUs)
+  until stopped. Databricks recommends **not** stopping it in production: if it's down long
+  enough for the source's change log to truncate, you must full-refresh the affected tables.
+  For a demo you can stop it to halt cost (`databricks pipelines stop <gateway-id>`),
+  accepting that trade-off. The scheduled job triggers **only** the ingestion pipeline.
+- **Staging retention is 30 days** — the gateway → ingestion staging Volume keeps change
+  data ~30 days by default; reprocessing further back requires a resnapshot.
 
 **Table-count limit & sharding (verified against the docs).** Databricks recommends
 **≤ 250 tables per ingestion pipeline** ([SQL Server connector limitations](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/sql-server-limits)
@@ -420,9 +442,8 @@ domain unit is `examples/files/erp_parquet.yml`. Data flow:
 2. Set `files_source_uri` in `databricks.yml` to that path (and `file_format` if
    not Parquet).
 3. Move `examples/files/erp_parquet.yml` → `resources/files/erp_parquet.yml`
-   (this is what brings it into the deploy glob), and add the `erp_ingestion`
-   `development:` override to the dev/prod targets (the `development:` flag belongs
-   in the target override, never the pipeline resource).
+   (this is what brings it into the deploy glob) — no `databricks.yml` edits; the target
+   `mode` (`development`/`production`) sets the pipeline's `development` flag automatically.
 4. `databricks bundle deploy && databricks bundle run erp_ingestion_job`.
 5. **Verify** with any SQL warehouse:
    `SELECT count(*), count(DISTINCT source_file) FROM <catalog>.yaif_erp.bronze_cloud_files;`
@@ -436,9 +457,11 @@ domain unit is `examples/files/erp_parquet.yml`. Data flow:
 Onboard another feed the same way you onboard an API domain: copy the domain
 file, rename the schema/volume/pipeline/job keys, point `source_path` at the new
 volume — the `src/files/` transformations are shared, zero code change. Set
-`dedup_keys` in the pipeline `configuration` when a connector re-exports
-overlapping windows (full + incremental); for high-volume feeds, upgrade silver to
-APPLY CHANGES keyed on that business key (noted in `silver_cloud_files.py`).
+`dedup_keys` in the pipeline `configuration` when a connector re-exports overlapping
+windows (full + incremental): silver then dedups to current state via **AUTO CDC SCD
+Type 1** (latest row per key, sequenced by `dedup_order_by` — defaults to the source
+file modification time), the same bounded mechanism the API module uses. Leave
+`dedup_keys` unset to keep every ingested row.
 
 ## Bonus: ad-hoc SQL access through the same connection
 

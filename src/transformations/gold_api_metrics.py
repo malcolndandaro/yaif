@@ -8,12 +8,19 @@ from pyspark.sql import functions as F
     name="gold_api_endpoint_health",
     comment=(
         "Per-endpoint health: latest fetch time, success/error counts, and average response "
-        "size over the last 7 days of ingestion. Powers an AI/BI dashboard widget."
+        "size over the last 7 days of ingestion. Powers an AI/BI dashboard widget. "
+        "Reads BRONZE on purpose — this is fetch/response health (every attempt, incl. errors "
+        "and retries), which the append-only bronze layer records; silver holds only "
+        "current-state records and would not show failed or superseded fetches."
     ),
     cluster_by=["endpoint"],
     table_properties={"quality": "gold"},
 )
 def gold_api_endpoint_health():
+    # current_date() is non-deterministic, so this MV fully recomputes each run rather
+    # than refreshing incrementally. Accepted: it is a tiny per-endpoint monitoring table.
+    # If incremental refresh is ever needed, drop the window here and apply the rolling
+    # 7-day filter in the dashboard query instead.
     bronze = spark.read.table("bronze_api_responses").filter(
         F.col("ingest_date") >= F.date_sub(F.current_date(), 7)
     )
@@ -37,11 +44,17 @@ def gold_api_endpoint_health():
 
 @dp.materialized_view(
     name="gold_api_records_per_day",
-    comment="Daily record counts by endpoint — input to ingestion volume trend dashboards.",
+    comment=(
+        "Current record count by endpoint, bucketed by the date each record was last "
+        "fetched (ingest_date). Silver is SCD Type 1 (deduped), so every record is counted "
+        "exactly once — this is the live record distribution, not cumulative re-fetch volume."
+    ),
     cluster_by=["ingest_date"],
     table_properties={"quality": "gold"},
 )
 def gold_api_records_per_day():
+    # Reads the deduped silver, so the deterministic aggregate can refresh incrementally
+    # on serverless (silver sets delta.enableRowTracking).
     return (
         spark.read.table("silver_api_records")
         .groupBy("ingest_date", "endpoint")

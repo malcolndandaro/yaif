@@ -58,8 +58,8 @@ TEMPLATE = '''\
 # Source of truth: the control-table rows where domain = '__DOMAIN__'.
 # Same shape as resources/api/content_domain.yml; the notebook + transformations are shared.
 # To deploy: review this file, move it into resources/api/, then `databricks bundle deploy`.
-# Reminder: add this pipeline's `development:` override to the dev/prod targets in
-# databricks.yml (the flag belongs in the target override, never the pipeline resource).
+# No databricks.yml edits needed: the target mode (development/production) sets each
+# pipeline's `development` flag automatically — onboarding a domain is a pure file copy.
 resources:
   schemas:
     __DOMAIN___schema:
@@ -88,7 +88,7 @@ resources:
             - on-update-fatal-failure
       permissions:
         - level: CAN_VIEW
-          group_name: "users"
+          group_name: ${var.viewers_group}
 
   jobs:
     __DOMAIN___fetch_and_pipeline:
@@ -104,6 +104,10 @@ resources:
               landing_table: "${var.catalog}.${resources.schemas.__DOMAIN___schema.name}.raw_api_responses"
               request_concurrency: ${var.request_concurrency}
           environment_key: fetch_env
+          # Retry infra-level failures (e.g. environment build) and bound runtime — the
+          # in-code tenacity retries only cover HTTP calls, not task setup.
+          max_retries: 2
+          timeout_seconds: 3600
         - task_key: run_pipeline
           depends_on:
             - task_key: fetch
@@ -123,6 +127,9 @@ __SCHEDULE_BLOCK__      queue:
       email_notifications:
         on_failure:
           - ${workspace.current_user.userName}
+      permissions:
+        - level: CAN_VIEW
+          group_name: ${var.viewers_group}
 '''
 
 

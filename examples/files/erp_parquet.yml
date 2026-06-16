@@ -36,13 +36,10 @@
 #    below must sit on a path the external location covers.
 #
 # 3. Move this file:  examples/files/erp_parquet.yml  ->  resources/files/erp_parquet.yml
+#    (no databricks.yml edits — the target mode sets the pipeline's `development` flag;
+#     see gotcha #1: never hardcode `development` in the pipeline resource).
 #
-# 4. Add the dev/prod `development:` override for `erp_ingestion` in databricks.yml
-#    (see gotcha #1 — without it, prod runs in dev mode with retries off):
-#       targets.dev.resources.pipelines.erp_ingestion.development:  true
-#       targets.prod.resources.pipelines.erp_ingestion.development: false
-#
-# 5. databricks bundle deploy && databricks bundle run erp_ingestion_job
+# 4. databricks bundle deploy && databricks bundle run erp_ingestion_job
 # -----------------------------------------------------------------------------
 resources:
   schemas:
@@ -75,8 +72,11 @@ resources:
         # Auto Loader reads from the governed Volume path, not the raw s3:// URI.
         source_path: "/Volumes/${var.catalog}/${resources.schemas.erp_schema.name}/landing/"
         file_format: ${var.file_format}
-        # Enable dedup for re-exported feeds by setting the business key(s):
+        # Dedup re-exported feeds to current state (AUTO CDC SCD Type 1) by setting the
+        # business key(s). Optionally set the sequence column (latest wins; defaults to
+        # the source file modification time). Leave dedup_keys unset to keep every row.
         # dedup_keys: "id"
+        # dedup_order_by: "source_file_modified_at"
       continuous: false
       notifications:
         - email_recipients:
@@ -86,7 +86,7 @@ resources:
             - on-update-fatal-failure
       permissions:
         - level: CAN_VIEW
-          group_name: "users"
+          group_name: ${var.viewers_group}
 
   jobs:
     erp_ingestion_job:
@@ -105,3 +105,6 @@ resources:
       email_notifications:
         on_failure:
           - ${workspace.current_user.userName}
+      permissions:
+        - level: CAN_VIEW
+          group_name: ${var.viewers_group}

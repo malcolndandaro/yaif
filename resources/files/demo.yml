@@ -32,6 +32,9 @@ resources:
       configuration:
         source_path: "/Volumes/${var.catalog}/${resources.schemas.demo_schema.name}/demo_landing/"
         file_format: "parquet"
+        # The seeder re-emits the same business key (order_id 1..100) each run, so silver
+        # dedups to current state via AUTO CDC SCD1 — re-running keeps it at 100, not 200.
+        dedup_keys: "order_id"
       continuous: false
       notifications:
         - email_recipients:
@@ -41,7 +44,7 @@ resources:
             - on-update-fatal-failure
       permissions:
         - level: CAN_VIEW
-          group_name: "users"
+          group_name: ${var.viewers_group}
 
   jobs:
     files_demo_seed_and_pipeline:
@@ -54,6 +57,9 @@ resources:
             base_parameters:
               target_path: "/Volumes/${var.catalog}/${resources.schemas.demo_schema.name}/demo_landing"
           environment_key: seed_env
+          # Retry infra-level failures (e.g. environment build) and bound runtime.
+          max_retries: 2
+          timeout_seconds: 1800
         - task_key: run_pipeline
           depends_on:
             - task_key: seed
@@ -68,3 +74,6 @@ resources:
       email_notifications:
         on_failure:
           - ${workspace.current_user.userName}
+      permissions:
+        - level: CAN_VIEW
+          group_name: ${var.viewers_group}

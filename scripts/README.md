@@ -57,9 +57,9 @@ looks like is checked in at
 
 1. Edit the control table (CSV or the UC table) — add/disable endpoints.
 2. Run the generator → review the YAML in `build/generated_api/`.
-3. Move the domains you want into `resources/api/`, add each pipeline's
-   `development:` override to the dev/prod targets in `databricks.yml`, and
-   `databricks bundle deploy`.
+3. Move the domains you want into `resources/api/` and `databricks bundle deploy`.
+   No `databricks.yml` edits: the target `mode` (`development`/`production`) sets each
+   pipeline's `development` flag automatically — onboarding a domain is a pure file copy.
 
 Notes:
 - The shared fetch job issues **GET** by path; `params` is appended as a query

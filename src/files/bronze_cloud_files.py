@@ -32,6 +32,8 @@ FILE_FORMAT = spark.conf.get("file_format", "parquet")
     cluster_by=["ingest_date"],
     table_properties={
         "delta.enableChangeDataFeed": "true",
+        # Row tracking lets serverless MVs reading this table refresh incrementally.
+        "delta.enableRowTracking": "true",
         "quality": "bronze",
     },
 )

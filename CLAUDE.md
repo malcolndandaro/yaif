@@ -120,21 +120,23 @@ yaif/
 
 ## Environment / how to test
 
-- **Any UC-enabled workspace** with serverless jobs **and** serverless pipelines in
-  the region, and a Unity Catalog metastore assigned to the workspace. Set
-  `var.catalog` to a catalog that exists (default `main`).
-- **CLI profile:** the dev/prod targets use profile `DEFAULT`. Point them at your own
-  workspace by editing `databricks.yml`, or override per command with
-  `--profile <your-profile>`. Dev mode prefixes schemas as `dev_<user>_<schema>`.
-- **Demo connection** must exist before the first API run:
+- **Default workspace = the SANDBOX.** Both `dev` and `prod` targets point at the
+  sandbox via profile `sqlserver-ws` (https://dbc-f9cc83ac-844b.cloud.databricks.com),
+  catalog `yaif` (the `var.catalog` default). The sandbox is a UC-enabled workspace with
+  serverless jobs + pipelines and the `yaif` catalog already created; the live SQL Server
+  Lakeflow gateway also lives there (deployed out-of-band; kept as `examples/`, not in the
+  deploy glob — do not redeploy/touch it). Point at a different workspace by editing
+  `databricks.yml` or overriding per command with `--profile <name> --var catalog=<cat>`.
+  Dev mode prefixes schemas as `dev_<user>_<schema>`.
+- **Demo connection** must exist in the target workspace before the first API run:
   `CREATE CONNECTION IF NOT EXISTS yaif_demo_api TYPE HTTP OPTIONS (host 'https://jsonplaceholder.typicode.com', port '443', base_path '/', bearer_token 'unused');`
-- **Deploy/run loop:**
+- **Deploy/run loop** (targets the sandbox by default):
   ```bash
-  databricks bundle validate
-  databricks bundle deploy   --auto-approve
-  databricks bundle run content_fetch_and_pipeline --no-wait
-  databricks bundle run people_fetch_and_pipeline  --no-wait
-  databricks bundle run files_demo_seed_and_pipeline    # files module demo
+  databricks bundle validate -t dev
+  databricks bundle deploy -t dev
+  databricks bundle run content_fetch_and_pipeline -t dev --no-wait
+  databricks bundle run people_fetch_and_pipeline  -t dev --no-wait
+  databricks bundle run files_demo_seed_and_pipeline -t dev    # files module demo
   ```
 - **Verify** counts with any SQL warehouse against the deployed schemas
   (`<catalog>.<schema>.silver_*` etc.).
@@ -143,8 +145,12 @@ yaif/
 
 ## Gotchas that WILL bite you (all learned the hard way — CLAUDE.md is their canonical home)
 
-1. `development: true` belongs in **target overrides** in `databricks.yml`, never in
-   the pipeline resource — else prod runs in dev mode with retries off.
+1. Never hardcode `development: true` in a pipeline *resource* — the targets'
+   `mode: development` / `mode: production` set the `development` flag per target
+   automatically (dev → `true`, prod → validated `false`). Baking it into the resource
+   is redundant in dev and **breaks `mode: production` validation** (prod validates
+   `development: false`). This is also why onboarding a domain needs zero `databricks.yml`
+   edits — no per-pipeline overrides to add.
 2. Pipeline `schema:` must reference `${resources.schemas.<key>.name}` (resolves the
    dev-prefixed name), NOT a plain `${var.schema}`.
 3. SDP `@dp.expect*` conditions evaluate against the **output** dataframe — they can

@@ -7,13 +7,17 @@ include:
 variables:
   catalog:
     description: "Unity Catalog for all domain schemas (must exist; schemas are created by the bundle)"
-    default: "main"
+    # Sandbox workspace (sqlserver-ws / dbc-f9cc83ac-844b) is this repo's test bed; its catalog is 'yaif'.
+    default: "yaif"
   api_connection:
     description: "UC HTTP connection holding host, base path, and credential"
     default: "yaif_demo_api"
   request_concurrency:
     description: "Concurrent HTTP requests per domain job (sum across overlapping jobs must respect the gateway rate limit)"
     default: "8"
+  viewers_group:
+    description: "Workspace group granted CAN_VIEW on every domain's pipeline + job. Default 'users' (all workspace users) suits a demo; for the per-team governance story, override globally here, per target, or per-domain (set a domain's own team group in its resources/*/*.yml)."
+    default: "users"
   # --- files module (Auto Loader) — used only once examples/files/*.yml is activated ---
   files_source_uri:
     description: "Object-storage path the connector writes Parquet to; a UC external location must already cover it. s3://… | abfss://… | gs://…"
@@ -30,36 +34,29 @@ variables:
     default: "your_source_db"
 
 targets:
+  # mode: development / mode: production set every pipeline's `development` flag per
+  # target automatically (dev -> true, prod -> validated false) and pause/enable
+  # schedules accordingly — so there are NO per-pipeline `development:` overrides here.
+  # Onboarding a domain is a pure file copy into resources/*/*.yml with zero databricks.yml churn.
+  #
+  # Both targets point at the SANDBOX workspace (profile `sqlserver-ws` =
+  # https://dbc-f9cc83ac-844b.cloud.databricks.com, catalog `yaif`) — this repo's
+  # everything-on-the-sandbox test bed. The SQL Server Lakeflow gateway also lives in
+  # this workspace (deployed out-of-band; kept as examples/, not in the deploy glob).
+  # Override per command with `--profile <name>` to target a different workspace.
   dev:
     default: true
     mode: development
     workspace:
-      # Set your CLI profile here, or override at deploy time with --profile <name>.
-      profile: DEFAULT
-    resources:
-      pipelines:
-        content_ingestion:
-          development: true
-        people_ingestion:
-          development: true
-        files_demo_ingestion:
-          development: true
+      profile: sqlserver-ws
 
   prod:
     mode: production
     workspace:
-      profile: DEFAULT
+      profile: sqlserver-ws
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
     variables:
       request_concurrency: "32"
-    resources:
-      pipelines:
-        content_ingestion:
-          development: false
-        people_ingestion:
-          development: false
-        files_demo_ingestion:
-          development: false
     permissions:
       - level: CAN_VIEW
-        group_name: "users"
+        group_name: ${var.viewers_group}

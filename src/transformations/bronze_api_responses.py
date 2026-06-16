@@ -17,6 +17,8 @@ LANDING_TABLE = spark.conf.get("landing_table")
     cluster_by=["endpoint", "ingest_date"],
     table_properties={
         "delta.enableChangeDataFeed": "true",
+        # Row tracking lets serverless MVs reading this table refresh incrementally.
+        "delta.enableRowTracking": "true",
         "quality": "bronze",
     },
 )
