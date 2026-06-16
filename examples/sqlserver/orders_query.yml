@@ -1,0 +1,136 @@
+# YAIF module: SQL Server QUERY-BASED ingestion via Lakeflow Connect (managed connector)
+#
+# Sibling of orders_cdc.yml. Use this path when the source CANNOT enable CDC or Change
+# Tracking (no privileges, locked-down DBA policy, etc.). Instead of a change feed, the
+# connector periodically QUERIES the source table and pulls rows whose monotonic cursor
+# column advanced since the last run — so there is NO gateway and NO staging Volume.
+# See README "Playbook B → CDC vs query-based: when to use which" for the trade-offs.
+# Docs: https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/query-based-pipeline
+#
+# This file is OUTSIDE the bundle include glob (resources/*/*.yml) on purpose: it needs a
+# real UC SQLSERVER connection, so leaving it in the glob would block `databricks bundle
+# deploy` of the demo until that connection exists. Activate it the same way you onboard
+# an API domain:
+#
+#   1. Create the UC connection to your SQL Server (admin, one-time). Credentials live
+#      in the connection — never in this file. Use a DEDICATED LEAST-PRIVILEGE login
+#      (only SELECT on the tables you ingest), never SA / db_owner:
+#        CREATE CONNECTION sqlserver_conn TYPE SQLSERVER
+#        OPTIONS (host '<host>', port '1433', user '<lfc_reader>', password '<password>',
+#                 trustServerCertificate 'true');
+#      (trustServerCertificate 'true' is LAB-ONLY — it skips server-cert validation.
+#       For prod, drop it or pin the CA so the connector verifies the server's TLS cert.)
+#   2. NO CDC / Change Tracking needed on the source — that is the whole point of this
+#      path. Each table you ingest DOES need a monotonic cursor column (see below).
+#   3. Set the variables in databricks.yml: `sqlserver_connection` and
+#      `sqlserver_source_database`. Replace the example table/cursor/key names below.
+#   4. Move this file to resources/sqlserver/ (no databricks.yml edits — the target mode
+#      sets each pipeline's `development` flag; see gotcha #1).
+#   5. Deploy, then run (and schedule) the ingestion job:
+#        databricks bundle deploy
+#        databricks bundle run sqlserver_query_ingestion_job   # triggers the query-based pull
+#
+# No custom code — Lakeflow Connect is the managed framework; YAIF contributes only
+# conventions (schema-per-module, naming, targets, monitoring).
+#
+# Flow:  ingestion (TRIGGERED: query source where cursor > watermark -> apply -> UC tables)
+#        No gateway, no staging Volume — the connector reads the source directly on a schedule.
+resources:
+  schemas:
+    sqlserver_query_schema:
+      catalog_name: ${var.catalog}
+      name: yaif_sqlserver_query
+      comment: "YAIF SQL Server module — query-based (cursor) ingestion tables (no CDC/gateway)"
+
+  pipelines:
+    # Query-based ingestion: connects to SQL Server and, each run, SELECTs rows whose
+    # cursor column advanced since the last watermark, then applies them into UC tables.
+    # There is NO gateway_definition / ingestion_gateway_id and NO staging Volume — the
+    # connector queries the source directly. Lakeflow Connect ingestion is TRIGGERED-only;
+    # the job below sets the cadence.
+    sqlserver_query_ingestion:
+      name: "[${bundle.target}] yaif-sqlserver-query"
+      serverless: true
+      continuous: false   # triggered; the job (below) drives the schedule
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.sqlserver_query_schema.name}
+      ingestion_definition:
+        connection_name: ${var.sqlserver_connection}
+        objects:
+          # One block per source table (example names — replace with yours). Each table
+          # MUST have a cursor column; SCD Type 1 + primary_keys gives current-state
+          # dedup keyed on the PK, sequenced by the cursor — the SAME semantics as the
+          # AUTO CDC SCD1 used in the API/files silver layers.
+          - table:
+              source_catalog: ${var.sqlserver_source_database}
+              source_schema: dbo
+              source_table: Orders
+              destination_catalog: ${var.catalog}
+              destination_schema: ${resources.schemas.sqlserver_query_schema.name}
+              table_configuration:
+                primary_keys:
+                  - OrderID
+                scd_type: SCD_TYPE_1   # current-state per key; SCD_TYPE_2 / APPEND_ONLY also valid
+                query_based_connector_config:
+                  # REQUIRED: exactly ONE monotonically-increasing column per table. Each
+                  # run pulls rows where this column advanced past the last watermark;
+                  # without a monotonic cursor the connector FULL-reloads every run.
+                  # Prefer a row-version timestamp (e.g. a ModifiedDate/last_updated) when
+                  # the table has one — it advances on UPDATEs too. Here the demo Orders
+                  # table only exposes the identity int OrderID (monotonic for inserts).
+                  cursor_columns:
+                    - OrderID
+                  # DELETES are API-only (not settable via this YAML):
+                  #   - Soft delete (GA): deletion_condition, e.g. "IsDeleted = 1" — rows
+                  #     matching it are treated as deletes. Configure via the pipelines API.
+                  #   - Hard delete capture (Beta, API-only):
+                  #     hard_deletion_sync_min_interval_in_seconds — detects physical row
+                  #     removals via periodic primary-key snapshots.
+                  # Query-based captures the LATEST state at each run, not every
+                  # intermediate change between runs (unlike the CDC change feed).
+          - table:
+              source_catalog: ${var.sqlserver_source_database}
+              source_schema: dbo
+              source_table: Customers
+              destination_catalog: ${var.catalog}
+              destination_schema: ${resources.schemas.sqlserver_query_schema.name}
+              table_configuration:
+                primary_keys:
+                  - CustomerID
+                scd_type: SCD_TYPE_1
+                query_based_connector_config:
+                  cursor_columns:
+                    - CustomerID
+      notifications:
+        - email_recipients:
+            - ${workspace.current_user.userName}
+          alerts:
+            - on-update-failure
+            - on-update-fatal-failure
+      permissions:
+        - level: CAN_VIEW
+          group_name: ${var.viewers_group}
+
+  jobs:
+    # Schedules the query-based ingestion pipeline — the repeatable "pull the latest rows"
+    # unit. There is no gateway to run; the job triggers only the ingestion pipeline.
+    # Pick a cadence that balances freshness against source query load (query-based reads
+    # the source directly each run, so it adds load the CDC path does not).
+    sqlserver_query_ingestion_job:
+      name: "[${bundle.target}] yaif-sqlserver-query"
+      description: "SQL Server query-based: pull rows where cursor > watermark -> apply into UC"
+      tasks:
+        - task_key: ingest_query
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.sqlserver_query_ingestion.id}
+      schedule:
+        quartz_cron_expression: "0 0 */4 * * ?"   # every 4 hours — tune to your freshness SLA
+        timezone_id: "UTC"
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}
+      permissions:
+        - level: CAN_VIEW
+          group_name: ${var.viewers_group}

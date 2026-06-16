@@ -69,7 +69,8 @@ yaif/
 │   └── files/
 │       └── demo.yml                  # files module self-contained demo (MANAGED volume + synthetic seeder) — in glob, deploys cleanly
 ├── examples/                         # activate-by-moving units — OUTSIDE the include glob (need external setup)
-│   ├── sqlserver/orders_cdc.yml      #   Lakeflow Connect gateway + ingestion + job (needs a UC SQLSERVER connection)
+│   ├── sqlserver/orders_cdc.yml      #   Lakeflow Connect CDC: continuous gateway + ingestion + job (needs a UC SQLSERVER connection + CDC/CT on source)
+│   ├── sqlserver/orders_query.yml    #   Lakeflow Connect QUERY-BASED: cursor-driven ingestion + scheduled job, NO gateway (use when source can't enable CDC/CT)
 │   └── files/erp_parquet.yml         #   real file feed: schema + EXTERNAL volume + pipeline + job (needs a UC external location)
 └── src/                              # SHARED module source — never copy per-domain
     ├── jobs/
@@ -103,6 +104,16 @@ yaif/
   `sqlserver_connection` / `sqlserver_source_database` vars and moving the file into
   `resources/sqlserver/`. The gateway is CONTINUOUS when deployed (always runs/bills
   until stopped — `databricks pipelines stop <id>`).
+  - **Two SQL Server patterns, pick by source constraint** (both Lakeflow Connect, both
+    out-of-glob in `examples/sqlserver/`): **CDC** (`orders_cdc.yml`, continuous gateway +
+    triggered ingestion) when the source can enable CDC/Change Tracking and you need full
+    change/delete history; **query-based** (`orders_query.yml`, NO gateway, scheduled
+    cursor-driven pulls) when the source CANNOT enable CDC/CT. Query-based needs one
+    monotonic cursor column per table (`table_configuration.query_based_connector_config.cursor_columns`)
+    + `primary_keys` + `scd_type: SCD_TYPE_1` (current-state dedup keyed on the PK, the same
+    semantics as the API/files AUTO CDC silver). Query-based deletes are API-only
+    (soft `deletion_condition` GA; hard-delete Beta) and it captures latest-state-per-run,
+    not every change. See README "Playbook B → CDC vs query-based".
 - ✅ **Files module (Auto Loader): built & verified end-to-end.** Shared medallion in
   `src/files/` (cloudFiles bronze -> silver -> gold). Verified via the self-contained
   demo `resources/files/demo.yml` (MANAGED volume + synthetic Parquet seeder

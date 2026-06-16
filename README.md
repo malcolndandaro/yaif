@@ -347,11 +347,34 @@ then deploy. (See [`scripts/README.md`](scripts/README.md) for the full round-tr
 Framework code written: **zero**. Adding endpoints later = edit the control table +
 re-run the generator (or just `INSERT` if you adopt the runtime-read option above).
 
-## Playbook B — SQL Server (CDC via Lakeflow Connect)
+## Playbook B — SQL Server (CDC or query-based via Lakeflow Connect)
 
-A managed connector — YAIF supplies only conventions, no custom code. The template
-is `examples/sqlserver/orders_cdc.yml` (gateway + ingestion + job), kept **outside**
-the deploy glob because it needs a live connection.
+A managed connector — YAIF supplies only conventions, no custom code. Two sibling
+templates, both kept **outside** the deploy glob because they need a live connection:
+
+| Template | Pattern | Use when |
+|---|---|---|
+| `examples/sqlserver/orders_cdc.yml` | **CDC** — continuous gateway + triggered ingestion | The source can enable CDC / Change Tracking; you need every intermediate change and full delete capture |
+| `examples/sqlserver/orders_query.yml` | **Query-based** — scheduled, no gateway | The source **cannot** enable CDC/CT; each table has a monotonic cursor column |
+
+### CDC vs query-based: when to use which
+
+|   | **CDC (gateway)** | **Query-based** |
+|---|---|---|
+| Source prerequisite | CDC or Change Tracking enabled on the source | **None** — just a `SELECT`-able cursor column per table |
+| Infra | Continuous gateway (classic compute) + staging Volume | **No gateway, no staging Volume** — connector queries the source directly |
+| Cost / ops | Gateway runs and bills continuously until stopped | Cheaper/simpler: serverless, runs only on its schedule |
+| Change fidelity | Every intermediate change between runs | **Latest state at each scheduled run** only |
+| Deletes | Full delete capture from the change feed | Soft delete via `deletion_condition` (GA, API-only); **hard-delete capture is Beta** (API-only) |
+| Source load | Low (reads the change feed) | Higher — queries the source table each run |
+| Requirement | — | Each table needs **one monotonically-increasing cursor** (timestamp or incrementing int); without it the connector full-reloads every run |
+
+Both land governed UC tables and use the same **SCD Type 1, keyed on the primary key**,
+current-state dedup the API/files silver layers use (query-based sequences by the cursor
+column; CDC by the change sequence). Pick query-based when the source owner won't (or
+can't) turn on CDC/CT; pick CDC when you need full change history or delete capture.
+
+The CDC steps follow; for the query-based path skip to **"Query-based activation"** below.
 
 1. **Enable CDC or Change Tracking** on the source tables (your DBA).
 2. **Create the UC connection** (credentials live here, never in a file):
@@ -405,6 +428,34 @@ the same `yaif_sqlserver` schema. The commented second pair in
 `examples/sqlserver/orders_cdc.yml` shows the split. (Note: the docs describe scaling
 via separate gateway-ingestion *pairs*, not one gateway feeding many ingestion
 pipelines.)
+
+### Query-based activation (no CDC/CT on the source)
+
+Template: `examples/sqlserver/orders_query.yml` (ingestion pipeline + scheduled job — **no
+gateway, no staging Volume**). Use it when the source can't enable CDC/Change Tracking.
+
+1. **Create the UC connection** — same `SQLSERVER` connection as CDC (a least-privilege
+   login needs only `SELECT` on the tables you ingest; no CDC/CT setup on the source).
+2. **Pick a cursor column per table** — exactly one monotonically-increasing column
+   (a row-version timestamp like `ModifiedDate`, or an incrementing int). Set it under
+   each table's `table_configuration.query_based_connector_config.cursor_columns`, with
+   `primary_keys` + `scd_type: SCD_TYPE_1` for current-state dedup keyed on the PK. Without
+   a monotonic cursor the connector **full-reloads every run**.
+3. **Set the variables** in `databricks.yml` (`sqlserver_connection`, `sqlserver_source_database`)
+   and replace the example table/cursor/key names.
+4. **Activate:** move `examples/sqlserver/orders_query.yml` → `resources/sqlserver/`
+   (no `databricks.yml` edits — the target `mode` sets the pipeline's `development` flag).
+5. **Deploy & schedule:** `databricks bundle deploy`, then `databricks bundle run
+   sqlserver_query_ingestion_job` (or let its schedule drive it). No gateway to start.
+6. **Verify:** `SELECT count(*) FROM <catalog>.yaif_sqlserver_query.<table>;`
+
+**Query-based trade-offs:** no CDC/CT and no continuous gateway → simpler, cheaper, fully
+serverless. But: (a) it **requires a monotonic cursor per table**; (b) **deletes** are
+limited — soft deletes via `deletion_condition` (GA, **API-only** — not settable in the
+bundle YAML), and **hard-delete capture is Beta** (`hard_deletion_sync_min_interval_in_seconds`,
+also API-only) — vs full delete capture in CDC; (c) it captures the **latest state at each
+scheduled run, not every intermediate change** between runs; and (d) it **queries the source
+directly on each run**, adding source load the CDC change-feed path avoids.
 
 ## Playbook C — Files in cloud storage (Auto Loader)
 
