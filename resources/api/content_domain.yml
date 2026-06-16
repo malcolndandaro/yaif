@@ -1,0 +1,67 @@
+# Domain: content (posts, comments, albums, photos)
+# One self-contained unit: schema + SDP pipeline + orchestration job.
+# To onboard a new domain, copy this file, rename the resource keys/schema,
+# and adjust the endpoint list — the notebook and transformations are shared.
+resources:
+  schemas:
+    content_schema:
+      catalog_name: ${var.catalog}
+      name: yaif_content
+      comment: "YAIF API module — content domain (bronze/silver/gold)"
+
+  pipelines:
+    content_ingestion:
+      name: "[${bundle.target}] yaif-api-content"
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.content_schema.name}
+      serverless: true
+      photon: true
+      libraries:
+        - glob:
+            include: ../../src/transformations/**
+      configuration:
+        landing_table: "${var.catalog}.${resources.schemas.content_schema.name}.raw_api_responses"
+      continuous: false
+      notifications:
+        - email_recipients:
+            - ${workspace.current_user.userName}
+          alerts:
+            - on-update-failure
+            - on-update-fatal-failure
+      permissions:
+        - level: CAN_VIEW
+          group_name: "users"
+
+  jobs:
+    content_fetch_and_pipeline:
+      name: "[${bundle.target}] yaif-api-content"
+      description: "Content domain: fetch APIs -> landing table -> SDP medallion"
+      tasks:
+        - task_key: fetch
+          notebook_task:
+            notebook_path: ../../src/jobs/fetch_api_responses.py
+            base_parameters:
+              api_connection: ${var.api_connection}
+              api_endpoints: "/posts,/comments,/albums,/photos"
+              landing_table: "${var.catalog}.${resources.schemas.content_schema.name}.raw_api_responses"
+              request_concurrency: ${var.request_concurrency}
+          environment_key: fetch_env
+        - task_key: run_pipeline
+          depends_on:
+            - task_key: fetch
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.content_ingestion.id}
+      environments:
+        - environment_key: fetch_env
+          spec:
+            client: "2"
+            dependencies:
+              - "tenacity>=8.2.0"
+              # Floor must exceed the serverless-preinstalled SDK, or pip skips the
+              # upgrade and serving_endpoints.http_request() doesn't exist.
+              - "databricks-sdk>=0.50.0"
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}

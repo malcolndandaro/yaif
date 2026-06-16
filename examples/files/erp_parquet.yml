@@ -1,0 +1,107 @@
+# =============================================================================
+# Files module — cloud-storage Parquet ingestion via Auto Loader + SDP
+# =============================================================================
+# Source pattern: a connector (e.g. Arcosoft exporting from SAP) drops .parquet
+# files into an object-storage bucket (S3 / ADLS / GCS). Auto Loader picks up new
+# files incrementally; the SDP medallion (bronze/silver/gold) lives in src/files/.
+#
+# This file is a self-contained domain unit: schema + external Volume + pipeline +
+# job. It is intentionally OUTSIDE the bundle include glob (resources/*/*.yml), so
+# it deploys NOTHING until you move it to resources/files/erp_parquet.yml. That
+# keeps `databricks bundle deploy` of the API demo clean while your bucket is not
+# yet wired up.
+#
+# -----------------------------------------------------------------------------
+# ACTIVATION (one-time, then move this file to resources/files/)
+# -----------------------------------------------------------------------------
+# 1. Have an admin register the bucket with Unity Catalog (governed access):
+#
+#      -- a) storage credential (AWS example: an IAM role UC can assume)
+#      CREATE STORAGE CREDENTIAL IF NOT EXISTS yaif_files_cred
+#        WITH AWS_IAM_ROLE 'arn:aws:iam::<account-id>:role/<uc-access-role>';
+#
+#      -- b) external location over the bucket prefix the connector writes to
+#      CREATE EXTERNAL LOCATION IF NOT EXISTS yaif_files_loc
+#        URL 's3://<your-bucket>/arcosoft/'
+#        WITH (STORAGE CREDENTIAL yaif_files_cred);
+#
+#      GRANT READ FILES, WRITE FILES ON EXTERNAL LOCATION yaif_files_loc TO `data-engineers`;
+#
+#    (ADLS: abfss://<container>@<account>.dfs.core.windows.net/... + an
+#     access-connector managed identity. GCS: gs://<bucket>/... + a service account.
+#     Same shape — only the credential type and URL scheme change.)
+#
+# 2. Point `files_source_uri` (in databricks.yml variables) at the SAME path as the
+#    external location above, e.g. s3://<your-bucket>/arcosoft/ . The EXTERNAL volume
+#    below must sit on a path the external location covers.
+#
+# 3. Move this file:  examples/files/erp_parquet.yml  ->  resources/files/erp_parquet.yml
+#
+# 4. Add the dev/prod `development:` override for `erp_ingestion` in databricks.yml
+#    (see gotcha #1 — without it, prod runs in dev mode with retries off):
+#       targets.dev.resources.pipelines.erp_ingestion.development:  true
+#       targets.prod.resources.pipelines.erp_ingestion.development: false
+#
+# 5. databricks bundle deploy && databricks bundle run erp_ingestion_job
+# -----------------------------------------------------------------------------
+resources:
+  schemas:
+    erp_schema:
+      catalog_name: ${var.catalog}
+      name: yaif_erp
+      comment: "YAIF files module — ERP exports landed as Parquet (bronze/silver/gold)"
+
+  volumes:
+    erp_landing:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.erp_schema.name}
+      name: landing
+      volume_type: EXTERNAL
+      storage_location: ${var.files_source_uri}
+      comment: "Governed drop zone for the connector's Parquet exports. Requires a UC external location already covering this path."
+
+  pipelines:
+    erp_ingestion:
+      name: "[${bundle.target}] yaif-files-erp"
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.erp_schema.name}
+      serverless: true
+      photon: true
+      libraries:
+        # Two levels up: examples/files/ (and resources/files/) -> repo root -> src/files
+        - glob:
+            include: ../../src/files/**
+      configuration:
+        # Auto Loader reads from the governed Volume path, not the raw s3:// URI.
+        source_path: "/Volumes/${var.catalog}/${resources.schemas.erp_schema.name}/landing/"
+        file_format: ${var.file_format}
+        # Enable dedup for re-exported feeds by setting the business key(s):
+        # dedup_keys: "id"
+      continuous: false
+      notifications:
+        - email_recipients:
+            - ${workspace.current_user.userName}
+          alerts:
+            - on-update-failure
+            - on-update-fatal-failure
+      permissions:
+        - level: CAN_VIEW
+          group_name: "users"
+
+  jobs:
+    erp_ingestion_job:
+      name: "[${bundle.target}] yaif-files-erp"
+      description: "ERP file feed: Auto Loader ingest from volume -> SDP medallion"
+      tasks:
+        - task_key: run_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.erp_ingestion.id}
+      # Schedule the feed once a cadence is known (stagger across feeds sharing a bucket):
+      # schedule:
+      #   quartz_cron_expression: "0 0 */4 * * ?"   # every 4 hours
+      #   timezone_id: "America/Santiago"
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}

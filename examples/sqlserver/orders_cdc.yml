@@ -1,0 +1,105 @@
+# YAIF module: SQL Server CDC via Lakeflow Connect (managed connector)
+#
+# Verified end-to-end against SQL Server 2022: a triggered gateway snapshots and
+# captures changes (CDC / Change Tracking) into staging, and an ingestion pipeline
+# applies them into Unity Catalog tables.
+#
+# This file is OUTSIDE the bundle include glob (resources/*/*.yml) on purpose: the
+# gateway needs a real UC SQLSERVER connection, so leaving it in the glob would block
+# `databricks bundle deploy` of the demo until that connection exists. Activate it the
+# same way you onboard an API domain:
+#
+#   1. Create the UC connection to your SQL Server (admin, one-time). Credentials live
+#      in the connection — never in this file:
+#        CREATE CONNECTION sqlserver_conn TYPE SQLSERVER
+#        OPTIONS (host '<host>', port '1433', user '<user>', password '<password>',
+#                 trustServerCertificate 'true');
+#   2. Enable CDC or Change Tracking on the source database/tables (ask your DBA).
+#   3. Set the variables in databricks.yml: `sqlserver_connection` and
+#      `sqlserver_source_database`.
+#   4. Move this file to resources/sqlserver/ and add the dev/prod `development:`
+#      overrides for `sqlserver_ingestion` (gotcha #1).
+#   5. databricks bundle deploy && databricks bundle run sqlserver_ingestion_job
+#
+# No custom code — Lakeflow Connect is the managed framework; YAIF contributes only
+# conventions (schema-per-module, naming, targets, monitoring).
+#
+# Flow:  gateway (snapshot + change capture -> staging)  ->  ingestion (apply -> UC tables)
+resources:
+  schemas:
+    sqlserver_schema:
+      catalog_name: ${var.catalog}
+      name: yaif_sqlserver
+      comment: "YAIF SQL Server module — Lakeflow Connect CDC tables + gateway staging"
+
+  pipelines:
+    # Gateway: connects to SQL Server, snapshots tables and captures changes into
+    # staging tables under the gateway storage schema. Triggered (not continuous)
+    # so an automated run completes instead of running forever.
+    sqlserver_gateway:
+      name: "[${bundle.target}] yaif-sqlserver-gateway"
+      serverless: true
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.sqlserver_schema.name}
+      gateway_definition:
+        connection_name: ${var.sqlserver_connection}
+        gateway_storage_catalog: ${var.catalog}
+        gateway_storage_schema: ${resources.schemas.sqlserver_schema.name}
+        gateway_storage_name: sqlserver_gateway_storage
+
+    # Ingestion: reads the gateway's staging area and applies changes into UC
+    # tables (SCD type 1 by default) in the destination schema.
+    sqlserver_ingestion:
+      name: "[${bundle.target}] yaif-sqlserver"
+      serverless: true
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.sqlserver_schema.name}
+      ingestion_definition:
+        ingestion_gateway_id: ${resources.pipelines.sqlserver_gateway.id}
+        objects:
+          # One block per source table (example names — replace with yours):
+          - table:
+              source_catalog: ${var.sqlserver_source_database}
+              source_schema: dbo
+              source_table: Customers
+              destination_catalog: ${var.catalog}
+              destination_schema: ${resources.schemas.sqlserver_schema.name}
+          - table:
+              source_catalog: ${var.sqlserver_source_database}
+              source_schema: dbo
+              source_table: Orders
+              destination_catalog: ${var.catalog}
+              destination_schema: ${resources.schemas.sqlserver_schema.name}
+          # Or ingest a whole schema in one block:
+          # - schema:
+          #     source_catalog: ${var.sqlserver_source_database}
+          #     source_schema: dbo
+          #     destination_catalog: ${var.catalog}
+          #     destination_schema: ${resources.schemas.sqlserver_schema.name}
+      notifications:
+        - email_recipients:
+            - ${workspace.current_user.userName}
+          alerts:
+            - on-update-failure
+            - on-update-fatal-failure
+
+  jobs:
+    # Chains the triggered gateway then the ingestion pipeline — the repeatable
+    # "pull latest changes" unit. Schedule it once a cadence is known.
+    sqlserver_ingestion_job:
+      name: "[${bundle.target}] yaif-sqlserver"
+      description: "SQL Server CDC: gateway snapshot/capture -> ingestion apply into UC"
+      tasks:
+        - task_key: gateway_capture
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.sqlserver_gateway.id}
+        - task_key: ingest_apply
+          depends_on:
+            - task_key: gateway_capture
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.sqlserver_ingestion.id}
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}

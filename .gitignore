@@ -1,0 +1,19 @@
+# Databricks Asset Bundle state
+.databricks/
+.bundle/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Engagement-specific artifacts — not part of the reusable framework
+reports/

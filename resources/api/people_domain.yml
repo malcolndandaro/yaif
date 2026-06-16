@@ -1,0 +1,63 @@
+# Domain: people (users, todos)
+# Copy of the per-domain pattern — see content_domain.yml for the template notes.
+resources:
+  schemas:
+    people_schema:
+      catalog_name: ${var.catalog}
+      name: yaif_people
+      comment: "YAIF API module — people domain (bronze/silver/gold)"
+
+  pipelines:
+    people_ingestion:
+      name: "[${bundle.target}] yaif-api-people"
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.people_schema.name}
+      serverless: true
+      photon: true
+      libraries:
+        - glob:
+            include: ../../src/transformations/**
+      configuration:
+        landing_table: "${var.catalog}.${resources.schemas.people_schema.name}.raw_api_responses"
+      continuous: false
+      notifications:
+        - email_recipients:
+            - ${workspace.current_user.userName}
+          alerts:
+            - on-update-failure
+            - on-update-fatal-failure
+      permissions:
+        - level: CAN_VIEW
+          group_name: "users"
+
+  jobs:
+    people_fetch_and_pipeline:
+      name: "[${bundle.target}] yaif-api-people"
+      description: "People domain: fetch APIs -> landing table -> SDP medallion"
+      tasks:
+        - task_key: fetch
+          notebook_task:
+            notebook_path: ../../src/jobs/fetch_api_responses.py
+            base_parameters:
+              api_connection: ${var.api_connection}
+              api_endpoints: "/users,/todos"
+              landing_table: "${var.catalog}.${resources.schemas.people_schema.name}.raw_api_responses"
+              request_concurrency: ${var.request_concurrency}
+          environment_key: fetch_env
+        - task_key: run_pipeline
+          depends_on:
+            - task_key: fetch
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.people_ingestion.id}
+      environments:
+        - environment_key: fetch_env
+          spec:
+            client: "2"
+            dependencies:
+              - "tenacity>=8.2.0"
+              - "databricks-sdk>=0.50.0"
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}

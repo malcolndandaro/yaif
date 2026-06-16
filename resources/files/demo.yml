@@ -1,0 +1,70 @@
+# Files module — self-contained Auto Loader demo (synthetic Parquet, MANAGED volume).
+# Unlike examples/files/erp_parquet.yml (real feed: EXTERNAL volume + bucket), this
+# needs no external location: a seed task writes Parquet into a managed Volume, then
+# the SDP pipeline (src/files/) ingests it. This is the "confirm the plumbing works"
+# path for the files module — the equivalent of the jsonplaceholder demo for the API
+# module. Safe to deploy anywhere; delete once you have a real feed.
+resources:
+  schemas:
+    demo_schema:
+      catalog_name: ${var.catalog}
+      name: yaif_files_demo
+      comment: "YAIF files module — self-contained Auto Loader demo (synthetic Parquet)"
+
+  volumes:
+    demo_landing:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.demo_schema.name}
+      name: demo_landing
+      volume_type: MANAGED
+      comment: "Drop zone for synthetic demo Parquet (managed — no external location needed)"
+
+  pipelines:
+    files_demo_ingestion:
+      name: "[${bundle.target}] yaif-files-demo"
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.demo_schema.name}
+      serverless: true
+      photon: true
+      libraries:
+        - glob:
+            include: ../../src/files/**
+      configuration:
+        source_path: "/Volumes/${var.catalog}/${resources.schemas.demo_schema.name}/demo_landing/"
+        file_format: "parquet"
+      continuous: false
+      notifications:
+        - email_recipients:
+            - ${workspace.current_user.userName}
+          alerts:
+            - on-update-failure
+            - on-update-fatal-failure
+      permissions:
+        - level: CAN_VIEW
+          group_name: "users"
+
+  jobs:
+    files_demo_seed_and_pipeline:
+      name: "[${bundle.target}] yaif-files-demo"
+      description: "Files demo: seed synthetic Parquet into a volume -> Auto Loader SDP medallion"
+      tasks:
+        - task_key: seed
+          notebook_task:
+            notebook_path: ../../src/jobs/seed_demo_parquet.py
+            base_parameters:
+              target_path: "/Volumes/${var.catalog}/${resources.schemas.demo_schema.name}/demo_landing"
+          environment_key: seed_env
+        - task_key: run_pipeline
+          depends_on:
+            - task_key: seed
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.files_demo_ingestion.id}
+      environments:
+        - environment_key: seed_env
+          spec:
+            client: "2"
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}

@@ -1,0 +1,495 @@
+# YAIF — Yet Another Ingestion Framework
+
+Production-grade ingestion patterns for the Databricks Lakehouse, organized as an
+**umbrella repo, not an abstraction layer**: one Asset Bundle, consistent
+conventions (naming, medallion, monitoring, dev/prod targets), independent modules
+per source type. No metadata engine, no wrapper around managed connectors — where
+Databricks already provides a declarative primitive (Lakeflow Connect, SDP), YAIF
+just configures it.
+
+## Modules
+
+| Module | Source type | Status | Mechanism |
+|---|---|---|---|
+| `resources/api/` | REST APIs | ✅ built & verified | UC HTTP Connection + thread-pool fetch + SDP medallion |
+| `examples/sqlserver/` (move to `resources/sqlserver/` to activate) | SQL Server CDC | ✅ built & verified | Lakeflow Connect (gateway + ingestion pipeline) — pure config |
+| `src/files/` + `examples/files/` | Files in cloud storage (Parquet/CSV/JSON) — incl. SAP via a connector like Arcosoft | ✅ built & verified (demo) | Auto Loader (`cloudFiles`) reading a UC-governed Volume → SDP bronze/silver/gold |
+
+## Start here: you received YAIF — now what?
+
+YAIF exists to **accelerate ingestion onboarding** — to turn "we have hundreds of
+sources to land in the lakehouse" into a repeatable, *copy-one-file-per-source*
+workflow instead of a bespoke notebook per source. The loop is always the same:
+
+1. **Set up once** (~5 min) — CLI, a catalog, run a demo to confirm the plumbing.
+2. **Pick your source type** and follow its playbook below.
+3. **Repeat per source / domain** — each new source is a file copy + a few field
+   edits (or one row in a control table). You never write new framework code.
+
+> If you have **900 APIs**, you do *not* create 900 jobs by hand. You group them
+> into ~45 domains, drive the endpoint lists from a control table, and **generate**
+> the per-domain resources from a list. See **Playbook A → "Scale to hundreds/
+> thousands"** for the exact, copy-pasteable steps.
+
+### Step 0 — set up once
+
+```bash
+# a) Authenticate the CLI to your workspace
+databricks auth login --host https://<your-workspace>.cloud.databricks.com
+
+# b) Get the code and point the bundle at your workspace + an existing catalog
+git clone <this-repo> && cd yaif
+#    edit databricks.yml → targets.dev.workspace.profile + var.catalog
+#    (or just pass --profile <name> on every command)
+
+# c) Confirm the plumbing with the self-contained files demo (no external setup)
+databricks bundle deploy -t dev
+databricks bundle run files_demo_seed_and_pipeline
+```
+
+That demo seeds synthetic Parquet into a managed Volume and runs the full Auto
+Loader → bronze/silver/gold medallion — proving deploy + serverless + SDP work
+before you point at anything real. (The API demo needs one extra line — the
+`yaif_demo_api` connection — see Playbook A.)
+
+### Pick your source type
+
+| Your source is… | Module | Go to |
+|---|---|---|
+| A REST / HTTP API — one, or **hundreds** | API (real code: governed fetch + SDP) | **Playbook A** |
+| A **SQL Server** database (ongoing change capture) | Lakeflow Connect (managed) | **Playbook B** |
+| **Files a tool drops in a bucket** (Parquet/CSV/JSON — e.g. SAP exported by Arcosoft) | Auto Loader (`cloudFiles`) | **Playbook C** |
+
+## Design principles
+
+1. **Umbrella repo, not framework** — modules share conventions and deployment
+   workflow, never code abstractions. The API module has real code; the SQL Server
+   module is ~50 lines of Lakeflow Connect YAML. Wrapping a managed connector in a
+   custom framework only adds indirection.
+2. **One deployable unit per business domain** — each `resources/api/<domain>.yml`
+   is a self-contained schema + pipeline + job. Failure isolation, independent
+   schedules, per-team grants.
+3. **Governed auth via Unity Catalog** — API credentials live in UC HTTP
+   connections (granted, audited, OAuth M2M capable); database credentials live in
+   UC connections used by Lakeflow Connect. No secrets in code.
+
+## Layout
+
+```
+yaif/
+├── databricks.yml                    # bundle + shared variables + targets
+├── resources/
+│   └── api/                          # API module — one file per business domain
+│       ├── content_domain.yml        #   domain unit: schema + pipeline + job
+│       └── people_domain.yml         #   second domain — same pattern
+├── examples/
+│   ├── sqlserver/orders_cdc.yml      # Lakeflow Connect scaffold (outside include glob)
+│   └── files/erp_parquet.yml         # files-module domain unit (outside include glob; activate per feed)
+└── src/                              # SHARED module source — never copied per-domain
+    ├── jobs/
+    │   └── fetch_api_responses.py    # API: threaded fetch → Delta landing table
+    ├── transformations/              # API SDP pipeline source (raw .py files)
+    │   ├── bronze_api_responses.py   #   streaming from landing table
+    │   ├── silver_api_records.py     #   JSON parse + explode
+    │   └── gold_api_metrics.py       #   MVs: endpoint health, daily counts
+    └── files/                        # files SDP pipeline source (Auto Loader medallion)
+        ├── bronze_cloud_files.py     #   cloudFiles stream from a UC Volume + file lineage
+        ├── silver_cloud_files.py     #   quality + optional dedup
+        └── gold_cloud_files.py       #   MVs: ingestion health, rows/day
+```
+
+## Data flow (API module, per domain)
+
+```
+                              ┌────────────────────────────────┐
+  REST APIs (n endpoints) ───►│  fetch_api_responses (Job)     │
+                              │  thread pool + tenacity        │
+                              └──────────────┬─────────────────┘
+                                             ▼
+                              ┌────────────────────────────────┐
+                              │  raw_api_responses (Delta)     │
+                              └──────────────┬─────────────────┘
+                                             ▼
+                              ┌────────────────────────────────┐
+                              │  bronze_api_responses (STREAM) │  ← SDP pipeline
+                              └──────────────┬─────────────────┘
+                                             ▼
+                              ┌────────────────────────────────┐
+                              │  silver_api_records  (STREAM)  │   parse/explode/quality
+                              └──────────────┬─────────────────┘
+                                             ▼
+                              ┌────────────────────────────────┐
+                              │  gold_api_endpoint_health (MV) │   success_rate, errors
+                              │  gold_api_records_per_day (MV) │   daily counts
+                              └────────────────────────────────┘
+```
+
+## Prerequisites
+
+| Requirement | Detail |
+|---|---|
+| Databricks CLI | `>= v1.0` (`databricks --version`), authenticated profile (`databricks auth login`) |
+| Workspace | Unity Catalog enabled, serverless jobs **and** serverless pipelines available in the region |
+| Permissions | `USE CATALOG` + `CREATE SCHEMA` on the target catalog; `CREATE CONNECTION` on the metastore (or ask an admin for the connection + `USE CONNECTION` grant) |
+| Network | Workspace egress must reach your API gateway / database (private sources need NCC/private link) |
+| Python deps | None to install — `tenacity` + `databricks-sdk` are declared in each domain job's serverless `environment` spec |
+| `http_request` | DBR 15.4+ / SQL warehouse 2023.40+ (already true on serverless) |
+
+## Demo quick start (public test API)
+
+Create the demo connection once (the test API needs no real credential, but the
+connection must exist):
+
+```sql
+CREATE CONNECTION IF NOT EXISTS yaif_demo_api TYPE HTTP
+OPTIONS (host 'https://jsonplaceholder.typicode.com', port '443',
+         base_path '/', bearer_token 'unused');
+```
+
+Then:
+
+```bash
+databricks bundle validate
+databricks bundle deploy
+databricks bundle run content_fetch_and_pipeline   # posts, comments, albums, photos
+databricks bundle run people_fetch_and_pipeline    # users, todos
+```
+
+This ingests 6 endpoints across two demo domains, each with its own isolated
+medallion. Use it to confirm the plumbing works before pointing at real APIs.
+
+## Playbook A — REST / HTTP APIs (one source, or hundreds)
+
+The only module with real code: a thread-pooled fetch through a governed UC HTTP
+connection lands raw JSON in a Delta table, and an SDP medallion parses it. Steps
+1–5 onboard a domain; **"Scale to hundreds/thousands"** at the end is the path to
+900+ endpoints.
+
+**1. Create a UC HTTP connection per API host / business domain.**
+The credential lives here — encrypted in UC, granted per principal, audited:
+
+```sql
+-- Bearer token:
+CREATE CONNECTION company_api TYPE HTTP
+OPTIONS (
+  host 'https://api.yourcompany.com',
+  port '443',
+  base_path '/v1',
+  bearer_token '<your-token>'
+);
+
+-- Or OAuth M2M for APIs with rotating credentials:
+-- OPTIONS (host ..., port ..., base_path ...,
+--          client_id '...', client_secret '...',
+--          oauth_scope '...', token_endpoint 'https://.../oauth/token');
+
+GRANT USE CONNECTION ON CONNECTION company_api TO `data-engineers`;
+```
+
+**2. Point the bundle at your workspace, catalog, and connection** — edit `databricks.yml`:
+
+```yaml
+variables:
+  catalog:
+    default: "your_catalog"          # must exist; schemas are created by the bundle
+  api_connection:
+    default: "company_api"           # the connection from step 1
+targets:
+  dev:
+    workspace:
+      profile: your-cli-profile      # or host: https://your-workspace...
+```
+
+**3. Carve your endpoints into domain units.** Don't run everything in one job
+(blast radius, mixed SLAs, one team's bad API blocks everyone) and don't create
+one job per endpoint (operational sprawl). The unit is the **business domain**:
+
+```
+N endpoints ÷ business domain (finance, sales, logistics, ...) ≈ 10–30 units
+each unit = resources/api/<domain>.yml = schema + pipeline + job, sharing src/
+```
+
+To onboard a domain: copy `resources/api/content_domain.yml`, rename the resource
+keys and schema, set its endpoint list, deploy. ~60 lines of YAML, zero code.
+Split a domain further only when freshness SLAs differ (e.g. `finance_hourly` vs
+`finance_daily` — a job has one schedule).
+
+Why this shape:
+- **Failure isolation** — a broken API in one domain never blocks the others
+- **Independent schedules** — each domain job gets its own cron + concurrency
+- **Per-team governance** — grants on the domain schema and connection; each
+  medallion (bronze/silver/gold) lives in its domain schema
+- **Rate-limit budgeting** — the sum of `request_concurrency` across jobs that
+  overlap in schedule must stay under the gateway limit; stagger crons
+
+Start each domain with 10–20 endpoints, watch its `gold_api_endpoint_health`,
+then ramp `request_concurrency` to what the gateway tolerates. To go past a
+handful of domains, see **Scale to hundreds/thousands of endpoints** below.
+
+**4. Deploy, run, schedule:**
+
+```bash
+databricks bundle deploy -t dev
+databricks bundle run content_fetch_and_pipeline -t dev   # one command per domain
+
+# When ready, schedule each domain — add to its resources/api/<domain>.yml job:
+#   schedule:
+#     quartz_cron_expression: "0 0 */4 * * ?"   # every 4 hours
+#     timezone_id: "America/Santiago"
+# Stagger crons across domains sharing a gateway.
+```
+
+**5. Promote to prod:** `databricks bundle deploy -t prod` — prod target runs
+pipelines with `development: false` (full retries) and isolated schemas.
+
+### Scale to hundreds/thousands of endpoints (worked example: 900 APIs)
+
+Two levers keep "900 APIs" from ever meaning 900 files or 900 redeploys:
+
+**Lever 1 — endpoints come from a control table (add an endpoint without redeploying).**
+Create one table, then have the fetch notebook read its domain's slice at runtime:
+
+```sql
+CREATE TABLE ${var.catalog}.config.api_endpoints (
+  domain STRING, endpoint STRING, enabled BOOLEAN
+);
+-- INSERT one row per endpoint, tagged with the domain it belongs to.
+```
+
+```python
+# In src/jobs/fetch_api_responses.py, swap the api_endpoints widget read (~3 lines):
+DOMAIN = dbutils.widgets.get("domain")
+ENDPOINTS = [r.endpoint for r in
+    spark.read.table(f"{CATALOG}.config.api_endpoints")
+         .filter(f"enabled AND domain = '{DOMAIN}'").collect()]
+```
+
+Adding, pausing, or removing an endpoint is then an `INSERT`/`UPDATE` — no code, no deploy.
+
+**Lever 2 — generate the per-domain resources from a list (no hand-copying YAML).**
+One small script emits one `resources/api/<domain>.yml` per domain, mirroring
+`content_domain.yml`:
+
+```python
+# scripts/generate_api_domains.py  — run it, then `databricks bundle deploy`.
+from pathlib import Path
+
+DOMAINS = ["finance", "sales", "logistics", "hr", "inventory"]  # ...your ~45 domains
+
+TEMPLATE = """\
+resources:
+  schemas:
+    {d}_schema: {{catalog_name: ${{var.catalog}}, name: yaif_{d}}}
+  pipelines:
+    {d}_ingestion:
+      name: "[${{bundle.target}}] yaif-api-{d}"
+      catalog: ${{var.catalog}}
+      schema: ${{resources.schemas.{d}_schema.name}}
+      serverless: true
+      photon: true
+      libraries: [{{glob: {{include: ../../src/transformations/**}}}}]
+      configuration:
+        landing_table: "${{var.catalog}}.${{resources.schemas.{d}_schema.name}}.raw_api_responses"
+  jobs:
+    {d}_fetch_and_pipeline:
+      name: "[${{bundle.target}}] yaif-api-{d}"
+      tasks:
+        - task_key: fetch
+          notebook_task:
+            notebook_path: ../../src/jobs/fetch_api_responses.py
+            base_parameters:
+              api_connection: ${{var.api_connection}}
+              domain: "{d}"        # notebook reads this domain's endpoints from the control table
+              landing_table: "${{var.catalog}}.${{resources.schemas.{d}_schema.name}}.raw_api_responses"
+              request_concurrency: ${{var.request_concurrency}}
+          environment_key: fetch_env
+        - task_key: run_pipeline
+          depends_on: [{{task_key: fetch}}]
+          pipeline_task: {{pipeline_id: ${{resources.pipelines.{d}_ingestion.id}}}}
+      environments:
+        - environment_key: fetch_env
+          spec: {{client: "2", dependencies: ["tenacity>=8.2.0", "databricks-sdk>=0.50.0"]}}
+"""
+
+for d in DOMAINS:
+    Path(f"resources/api/{d}.yml").write_text(TEMPLATE.format(d=d))
+    print("wrote", d)
+```
+
+(Abbreviated for the README — copy the `notifications` / `permissions` / `queue`
+blocks from `content_domain.yml` for the full production template, or generate with
+[Python for DABs](https://docs.databricks.com/dev-tools/bundles/python).)
+
+**The 900-endpoint run, end to end:**
+
+1. Load all 900 endpoints into `config.api_endpoints`, each tagged with its domain
+   (≈45 domains × ≈20 endpoints — group by team / freshness SLA: `finance`, `sales`, …).
+2. Put those ~45 domain names in `DOMAINS` and run the generator → 45 YAML files.
+3. `databricks bundle deploy -t dev` → 45 isolated pipelines + 45 jobs created.
+4. Stagger each job's schedule and ramp `request_concurrency` per
+   `gold_api_endpoint_health`; promote with `-t prod`.
+
+Framework code written: **zero**. Adding endpoints later = `INSERT`s; adding a whole
+domain = one line in `DOMAINS` + redeploy.
+
+## Playbook B — SQL Server (CDC via Lakeflow Connect)
+
+A managed connector — YAIF supplies only conventions, no custom code. The template
+is `examples/sqlserver/orders_cdc.yml` (gateway + ingestion + job), kept **outside**
+the deploy glob because it needs a live connection.
+
+1. **Enable CDC or Change Tracking** on the source tables (your DBA).
+2. **Create the UC connection** (credentials live here, never in a file):
+   ```sql
+   CREATE CONNECTION sqlserver_conn TYPE SQLSERVER
+   OPTIONS (host '<host>', port '1433', user '<user>', password '<password>',
+            trustServerCertificate 'true');
+   GRANT USE CONNECTION ON CONNECTION sqlserver_conn TO `data-engineers`;
+   ```
+3. **Set the variables** in `databricks.yml`: `sqlserver_connection` and
+   `sqlserver_source_database`. List your tables in the example's `objects:` block
+   (one `table:` block each, or a single `schema:` block for a whole schema).
+4. **Activate:** move `examples/sqlserver/orders_cdc.yml` → `resources/sqlserver/`,
+   and add the `sqlserver_ingestion` `development:` override to the dev/prod targets
+   (gotcha #1).
+5. **Deploy & run:** `databricks bundle deploy && databricks bundle run sqlserver_ingestion_job`
+   — the job chains gateway capture → ingestion apply.
+6. **Verify** with any SQL warehouse:
+   `SELECT count(*) FROM <catalog>.yaif_sqlserver.<table>;`
+
+Onboard more tables: add `table:` blocks (or one `schema:` block) to `objects:` and
+redeploy — no new code. **Cost note:** the gateway runs *continuously* once deployed
+and bills until stopped — `databricks pipelines stop <gateway-id>` when idle.
+
+## Playbook C — Files in cloud storage (Auto Loader)
+
+Use this when a connector drops files into object storage and you own the
+ingestion — e.g. **Arcosoft exporting SAP tables as `.parquet` into an
+S3/ADLS/GCS bucket**. Unlike the API module (which lands payloads straight into a
+Delta table), files genuinely arrive *as files in a bucket*, which is exactly what
+Auto Loader (`cloudFiles`) is built for: incremental, exactly-once file discovery
+with schema evolution. Inside SDP the schema location and checkpoint are managed
+for you — there is no checkpoint to configure.
+
+The shared medallion code is `src/files/` (bronze → silver → gold); a per-feed
+domain unit is `examples/files/erp_parquet.yml`. Data flow:
+
+```
+  Connector (Arcosoft/SAP) ──► s3://bucket/arcosoft/*.parquet
+                                        │  (UC external location + EXTERNAL volume)
+                                        ▼
+                              /Volumes/<cat>/yaif_erp/landing/
+                                        │  Auto Loader (cloudFiles, format=parquet)
+                                        ▼
+                              bronze_cloud_files (STREAM)   + source-file lineage
+                                        ▼
+                              silver_cloud_files (STREAM)   quality + optional dedup
+                                        ▼
+                              gold_files_ingestion_health (MV)  files/rows/bytes/freshness
+                              gold_files_rows_per_day     (MV)  daily volume trend
+```
+
+**To activate a feed:**
+
+1. Register the bucket with Unity Catalog — a storage credential + external
+   location over the prefix the connector writes to (full SQL, incl. ADLS/GCS
+   variants, is in the header of `examples/files/erp_parquet.yml`).
+2. Set `files_source_uri` in `databricks.yml` to that path (and `file_format` if
+   not Parquet).
+3. Move `examples/files/erp_parquet.yml` → `resources/files/erp_parquet.yml`
+   (this is what brings it into the deploy glob), and add the `erp_ingestion`
+   `development:` override to the dev/prod targets (gotcha #1).
+4. `databricks bundle deploy && databricks bundle run erp_ingestion_job`.
+5. **Verify** with any SQL warehouse:
+   `SELECT count(*), count(DISTINCT source_file) FROM <catalog>.yaif_erp.bronze_cloud_files;`
+   and read `gold_files_ingestion_health` for files / rows / bytes / freshness.
+
+> **Try it now without a bucket:** `databricks bundle run files_demo_seed_and_pipeline`
+> runs this exact medallion against a MANAGED volume seeded with synthetic Parquet
+> (`resources/files/demo.yml`). Same Auto Loader → SDP code as a real feed — only the
+> volume type differs — so it's the fastest way to see the pattern work end to end.
+
+Onboard another feed the same way you onboard an API domain: copy the domain
+file, rename the schema/volume/pipeline/job keys, point `source_path` at the new
+volume — the `src/files/` transformations are shared, zero code change. Set
+`dedup_keys` in the pipeline `configuration` when a connector re-exports
+overlapping windows (full + incremental); for high-volume feeds, upgrade silver to
+APPLY CHANGES keyed on that business key (noted in `silver_cloud_files.py`).
+
+## Bonus: ad-hoc SQL access through the same connection
+
+The connection powering the API pipeline is queryable by analysts directly:
+
+```sql
+SELECT http_request(conn => 'company_api', method => 'GET', path => '/orders').text;
+```
+
+One governed credential serves bulk pipeline ingestion, ad-hoc SQL exploration,
+and per-principal access control with audit — zero credential duplication. This
+is a Unity Catalog governance differentiator worth demoing in platform
+comparisons.
+
+> **Fallback — secret scopes:** if your workspace can't use HTTP connections yet
+> (older DBR, missing privilege), swap the `get_with_retry` block for a plain
+> `requests.Session` with `Authorization: Bearer {dbutils.secrets.get(scope, key)}` —
+> the landing table contract and the SDP pipeline are identical either way.
+
+## What's different from a hand-rolled ingestion notebook
+
+| Concern | Typical legacy notebook | YAIF API module |
+|---|---|---|
+| Auth | notebook context token / hardcoded | UC HTTP Connection (governed, audited, OAuth M2M capable) |
+| Distribution | serial loop or ad-hoc pandas_udf | `ThreadPoolExecutor` on the endpoint list |
+| Retries | manual / missing | tenacity, exp backoff, retries 5xx + transient |
+| Persistence | often discarded | UC managed Delta landing table |
+| Schema evolution | manual | Delta `mergeSchema=true` on append |
+| Orchestration | none | DABs job + SDP pipeline per domain |
+| Environments | hardcoded host | `targets: dev / prod` with overrides |
+| Observability | none | `gold_api_endpoint_health` MV (success rate, errors, body size) |
+| Failure alerting | none | Email notifications on job + pipeline failure |
+
+## Verified results (2026-06-12)
+
+Both demo domains deployed and run **in parallel**, each through the UC
+connection, each with an isolated medallion in its own schema:
+
+| Domain | Raw | Bronze | Silver | Expected silver |
+|---|---|---|---|---|
+| content (`yaif_content`) | 4 | 4 | 5,700 | 100 posts + 500 comments + 100 albums + 5,000 photos ✓ |
+| people (`yaif_people`) | 2 | 2 | 210 | 10 users + 200 todos ✓ |
+
+Earlier runs additionally verified: incremental streaming across 3 consecutive
+runs (bronze processed only new batches), success_rate 1.0 on all endpoints, and
+1MB payloads byte-identical through the UC connection proxy.
+
+**Files module (Auto Loader), verified 2026-06-15** via the self-contained demo
+(`resources/files/demo.yml` + synthetic seeder — no external bucket needed,
+`databricks bundle run files_demo_seed_and_pipeline`):
+
+| Layer | Count | Expected |
+|---|---|---|
+| `bronze_cloud_files` | 100 | 100 rows across 2 Parquet drops ✓ |
+| `silver_cloud_files` | 100 | passthrough (no `dedup_keys` set) ✓ |
+| `gold_files_ingestion_health` | 2 files / 100 rows / 202,940 bytes | source-file lineage + freshness populated ✓ |
+
+This proves the same Auto Loader → SDP medallion that a real Arcosoft/SAP Parquet
+feed uses, with the only difference being a MANAGED demo volume vs. an EXTERNAL
+volume on the real bucket.
+
+## Gotchas baked into this template (learned the hard way)
+
+1. `development: true` lives in **target overrides**, not the pipeline resource —
+   otherwise prod runs in dev mode with retries disabled.
+2. Pipeline `schema:` references `${resources.schemas.<key>.name}` — dev mode
+   prefixes schema names, so a plain variable points at the wrong schema.
+3. SDP expectations evaluate against the **output** dataframe — they can only
+   reference columns that survive the final `select`.
+4. Landing API payloads straight into a Delta table beats Volume + Auto Loader
+   here — no empty-dir schema-inference failures, one less hop.
+5. Serverless preinstalls `databricks-sdk` — a dependency floor the preinstalled
+   version already satisfies is silently skipped by pip. Pin a floor **newer**
+   than the preinstalled version (`>=0.50.0`) or `http_request` won't exist.
+6. The enum `ExternalFunctionRequestHttpMethod` moves between SDK versions — the
+   fetch notebook imports it with a plain-string fallback.
+7. Paths in `resources/<module>/*.yml` are relative to the YAML file — moving a
+   resource file one level deeper means `../src/` becomes `../../src/`.

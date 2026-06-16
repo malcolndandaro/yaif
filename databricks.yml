@@ -1,0 +1,65 @@
+bundle:
+  name: yaif
+
+include:
+  - resources/*/*.yml
+
+variables:
+  catalog:
+    description: "Unity Catalog for all domain schemas (must exist; schemas are created by the bundle)"
+    default: "main"
+  api_connection:
+    description: "UC HTTP connection holding host, base path, and credential"
+    default: "yaif_demo_api"
+  request_concurrency:
+    description: "Concurrent HTTP requests per domain job (sum across overlapping jobs must respect the gateway rate limit)"
+    default: "8"
+  # --- files module (Auto Loader) — used only once examples/files/*.yml is activated ---
+  files_source_uri:
+    description: "Object-storage path the connector writes Parquet to; a UC external location must already cover it. s3://… | abfss://… | gs://…"
+    default: "s3://your-bucket/erp/"
+  file_format:
+    description: "Auto Loader source format for the files module (parquet | csv | json | avro)"
+    default: "parquet"
+  # --- SQL Server module — used only once examples/sqlserver/*.yml is activated ---
+  sqlserver_connection:
+    description: "Name of the UC SQLSERVER connection Lakeflow Connect uses (created out-of-band)"
+    default: "sqlserver_conn"
+  sqlserver_source_database:
+    description: "Source SQL Server database name to ingest from (the connector's source_catalog)"
+    default: "your_source_db"
+
+targets:
+  dev:
+    default: true
+    mode: development
+    workspace:
+      # Set your CLI profile here, or override at deploy time with --profile <name>.
+      profile: DEFAULT
+    resources:
+      pipelines:
+        content_ingestion:
+          development: true
+        people_ingestion:
+          development: true
+        files_demo_ingestion:
+          development: true
+
+  prod:
+    mode: production
+    workspace:
+      profile: DEFAULT
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      request_concurrency: "32"
+    resources:
+      pipelines:
+        content_ingestion:
+          development: false
+        people_ingestion:
+          development: false
+        files_demo_ingestion:
+          development: false
+    permissions:
+      - level: CAN_VIEW
+        group_name: "users"
