@@ -72,14 +72,21 @@ resources:
                   - OrderID
                 scd_type: SCD_TYPE_1   # current-state per key; SCD_TYPE_2 / APPEND_ONLY also valid
                 query_based_connector_config:
-                  # REQUIRED: exactly ONE monotonically-increasing column per table. Each
-                  # run pulls rows where this column advanced past the last watermark;
-                  # without a monotonic cursor the connector FULL-reloads every run.
-                  # Prefer a row-version timestamp (e.g. a ModifiedDate/last_updated) when
-                  # the table has one — it advances on UPDATEs too. Here the demo Orders
-                  # table only exposes the identity int OrderID (monotonic for inserts).
+                  # REQUIRED: exactly ONE monotonically-increasing column per table. Each run
+                  # pulls rows WHERE this column advanced past the last watermark.
+                  #
+                  # USE A MODIFIED-TIMESTAMP CURSOR, *NOT* THE IDENTITY PK. An identity /
+                  # auto-increment PK (OrderID) only ever advances on INSERT, so a PK cursor
+                  # captures new rows but SILENTLY MISSES every UPDATE to an existing row —
+                  # an insert-only feed masquerading as a full sync. ModifiedDate is set to
+                  # SYSUTCDATETIME() on INSERT (column DEFAULT) AND bumped on every UPDATE (an
+                  # AFTER UPDATE trigger — see the DemoDB seeder in the demo-environments repo),
+                  # so it advances on updates too and each run picks them up. The PK stays as
+                  # `primary_keys` (above) for SCD dedup — it is simply the wrong choice for the
+                  # cursor. (A row-version / rowversion column works too; without ANY monotonic
+                  # cursor the connector FULL-reloads every run.)
                   cursor_columns:
-                    - OrderID
+                    - ModifiedDate
                   # DELETES are API-only (not settable via this YAML):
                   #   - Soft delete (GA): deletion_condition, e.g. "IsDeleted = 1" — rows
                   #     matching it are treated as deletes. Configure via the pipelines API.
@@ -99,8 +106,11 @@ resources:
                   - CustomerID
                 scd_type: SCD_TYPE_1
                 query_based_connector_config:
+                  # Modified-timestamp cursor (see Orders above): advances on UPDATEs to a
+                  # customer row, so name/email edits flow through — a CustomerID (PK) cursor
+                  # would capture only new customers and miss every edit.
                   cursor_columns:
-                    - CustomerID
+                    - ModifiedDate
       notifications:
         - email_recipients:
             - ${workspace.current_user.userName}

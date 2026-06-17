@@ -367,12 +367,22 @@ templates, both kept **outside** the deploy glob because they need a live connec
 | Change fidelity | Every intermediate change between runs | **Latest state at each scheduled run** only |
 | Deletes | Full delete capture from the change feed | Soft delete via `deletion_condition` (GA, API-only); **hard-delete capture is Beta** (API-only) |
 | Source load | Low (reads the change feed) | Higher — queries the source table each run |
-| Requirement | — | Each table needs **one monotonically-increasing cursor** (timestamp or incrementing int); without it the connector full-reloads every run |
+| Requirement | — | Each table needs **one monotonic *modified* cursor** that advances on every INSERT **and UPDATE** (a `ModifiedDate`/`last_updated` timestamp or `rowversion`); an identity/auto-increment PK is **insert-only**, so it misses UPDATEs. Without any monotonic cursor the connector full-reloads every run |
 
 Both land governed UC tables and use the same **SCD Type 1, keyed on the primary key**,
 current-state dedup the API/files silver layers use (query-based sequences by the cursor
 column; CDC by the change sequence). Pick query-based when the source owner won't (or
 can't) turn on CDC/CT; pick CDC when you need full change history or delete capture.
+
+> **⚠️ Query-based REQUIRES a monotonic *modified* cursor to capture updates.** The
+> cursor must advance on every INSERT **and UPDATE** — a `ModifiedDate`/`last_updated`
+> timestamp (or `rowversion`). An identity / auto-increment primary key only advances on
+> INSERT, so using it as the cursor yields an **insert-only feed that silently misses
+> every UPDATE** to existing rows. Keep the PK as `primary_keys` (for SCD dedup); choose
+> a modified-timestamp for `cursor_columns`. The bundled demo models this: the `DemoDB`
+> seeder (in the `demo-environments` repo) adds a `ModifiedDate DATETIME2` column —
+> DEFAULT `SYSUTCDATETIME()` on insert, bumped by an AFTER UPDATE trigger — and
+> `examples/sqlserver/orders_query.yml` uses it as the cursor.
 
 The CDC steps follow; for the query-based path skip to **"Query-based activation"** below.
 
@@ -436,11 +446,16 @@ gateway, no staging Volume**). Use it when the source can't enable CDC/Change Tr
 
 1. **Create the UC connection** — same `SQLSERVER` connection as CDC (a least-privilege
    login needs only `SELECT` on the tables you ingest; no CDC/CT setup on the source).
-2. **Pick a cursor column per table** — exactly one monotonically-increasing column
-   (a row-version timestamp like `ModifiedDate`, or an incrementing int). Set it under
-   each table's `table_configuration.query_based_connector_config.cursor_columns`, with
-   `primary_keys` + `scd_type: SCD_TYPE_1` for current-state dedup keyed on the PK. Without
-   a monotonic cursor the connector **full-reloads every run**.
+2. **Pick a modified-timestamp cursor per table** — exactly one monotonically-increasing
+   column that advances on every INSERT **and UPDATE**: a `ModifiedDate`/`last_updated`
+   timestamp (or `rowversion`). **Do not use an identity/auto-increment PK as the cursor**
+   — it only advances on INSERT, so the feed becomes insert-only and silently misses every
+   UPDATE to an existing row. Set the cursor under each table's
+   `table_configuration.query_based_connector_config.cursor_columns`, and keep
+   `primary_keys` + `scd_type: SCD_TYPE_1` for current-state dedup keyed on the PK (the PK
+   is for dedup, not for the cursor). Without any monotonic cursor the connector
+   **full-reloads every run**. (The demo's `DemoDB` tables ship a `ModifiedDate DATETIME2`
+   column — DEFAULT on insert + AFTER UPDATE trigger — so `orders_query.yml` uses it.)
 3. **Set the variables** in `databricks.yml` (`sqlserver_connection`, `sqlserver_source_database`)
    and replace the example table/cursor/key names.
 4. **Activate:** move `examples/sqlserver/orders_query.yml` → `resources/sqlserver/`

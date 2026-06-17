@@ -108,12 +108,21 @@ yaif/
     out-of-glob in `examples/sqlserver/`): **CDC** (`orders_cdc.yml`, continuous gateway +
     triggered ingestion) when the source can enable CDC/Change Tracking and you need full
     change/delete history; **query-based** (`orders_query.yml`, NO gateway, scheduled
-    cursor-driven pulls) when the source CANNOT enable CDC/CT. Query-based needs one
-    monotonic cursor column per table (`table_configuration.query_based_connector_config.cursor_columns`)
-    + `primary_keys` + `scd_type: SCD_TYPE_1` (current-state dedup keyed on the PK, the same
-    semantics as the API/files AUTO CDC silver). Query-based deletes are API-only
-    (soft `deletion_condition` GA; hard-delete Beta) and it captures latest-state-per-run,
-    not every change. See README "Playbook B → CDC vs query-based".
+    cursor-driven pulls) when the source CANNOT enable CDC/CT. Query-based **REQUIRES a
+    monotonic _modified_ cursor column per table**
+    (`table_configuration.query_based_connector_config.cursor_columns`) that advances on
+    every INSERT **and UPDATE** — a `ModifiedDate`/`last_updated` timestamp or `rowversion`.
+    An identity/auto-increment PK as the cursor is **insert-only** → it SILENTLY MISSES
+    UPDATEs to existing rows; keep the PK as `primary_keys` (for SCD dedup), never as the
+    cursor. Pair the cursor with `primary_keys` + `scd_type: SCD_TYPE_1` (current-state
+    dedup keyed on the PK, the same semantics as the API/files AUTO CDC silver).
+    Query-based deletes are API-only (soft `deletion_condition` GA; hard-delete Beta) and
+    it captures latest-state-per-run, not every change. **The demo now models this best
+    practice:** the `DemoDB` seeder (in the `demo-environments` repo —
+    `environments/sqlserver/app/setup.sql` + `migrate_add_modifieddate.sql`) adds a
+    `ModifiedDate DATETIME2` column (DEFAULT `SYSUTCDATETIME()` on insert + AFTER UPDATE
+    trigger to bump it), and `orders_query.yml` uses `ModifiedDate` as the cursor. See
+    README "Playbook B → CDC vs query-based".
 - ✅ **Files module (Auto Loader): built & verified end-to-end.** Shared medallion in
   `src/files/` (cloudFiles bronze -> silver -> gold). Verified via the self-contained
   demo `resources/files/demo.yml` (MANAGED volume + synthetic Parquet seeder
