@@ -1,7 +1,7 @@
-domain,endpoint_name,path,method,params,schedule,enabled
-blog,posts,/posts,GET,,0 0 */4 * * ?,true
-blog,comments,/comments,GET,postId=1,0 0 */4 * * ?,true
-gallery,albums,/albums,GET,,0 30 2 * * ?,true
-gallery,photos,/photos,GET,,0 30 2 * * ?,true
-accounts,users,/users,GET,,0 0 6 * * ?,true
-accounts,todos,/todos,GET,,0 0 6 * * ?,false
+domain,endpoint_name,path,method,params,schedule,enabled,body,auth_mode,silver_shape
+blog,posts,/posts,GET,,0 0 */4 * * ?,true,,,
+blog,comments,/comments,GET,postId=1,0 0 */4 * * ?,true,,,
+gallery,albums,/albums,GET,,0 30 2 * * ?,true,,,
+gallery,photos,/photos,GET,,0 30 2 * * ?,true,,,
+accounts,users,/users,GET,,0 0 6 * * ?,true,,,
+accounts,todos,/todos,GET,,0 0 6 * * ?,false,,,

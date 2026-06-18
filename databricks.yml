@@ -10,8 +10,24 @@ variables:
     # Sandbox workspace (sqlserver-ws / dbc-f9cc83ac-844b) is this repo's test bed; its catalog is 'yaif'.
     default: "yaif"
   api_connection:
-    description: "UC HTTP connection holding host, base path, and credential"
+    description: "UC HTTP connection holding host, base path, and credential (auth_mode=connection domains)"
     default: "yaif_demo_api"
+  # --- basic_secret auth (auth_mode=basic_secret domains: direct requests + UC secret scope) ---
+  # Generic placeholders for generated/basic_secret API domains. Override per domain or globally.
+  # A UC HTTP connection CANNOT carry clean Basic auth (gotcha #9), so Basic-auth APIs use these.
+  api_base_url:
+    description: "Scheme+host for basic_secret API domains, e.g. https://host (no trailing path). Placeholder — set before activating a basic_secret domain."
+    default: "https://REPLACE-ME.example.com"
+  api_secret_scope:
+    description: "UC secret scope holding username/password for basic_secret API domains."
+    default: "yaif_api"
+  # --- Oracle EPM template (examples/api/epm_domain.yml) — CUSTOMER-RUN-ONLY, used only once activated ---
+  epm_host:
+    description: "Oracle EPM host for the CUSTOMER-RUN-ONLY epm_domain template. NEVER a real host in-repo — placeholder default. Set in the customer workspace."
+    default: "https://REPLACE-ME.example.com"
+  epm_secret_scope:
+    description: "Customer-managed UC secret scope with EPM username/password (epm_username/epm_password). Customer-populated only."
+    default: "epm_secrets"
   request_concurrency:
     description: "Concurrent HTTP requests per domain job (sum across overlapping jobs must respect the gateway rate limit)"
     default: "8"

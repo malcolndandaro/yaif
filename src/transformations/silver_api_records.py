@@ -18,84 +18,92 @@ AUTO CDC SCD1 mechanism for its dedup path — the two modules are deliberately 
 
 Note: AUTO CDC is the default SCD Type 1 behaviour of `create_auto_cdc_flow` (so
 `stored_as_scd_type` is left at its default rather than passed explicitly).
+
+Silver shape fork: both silver_api_records.py (this file, the record-array shape) and
+silver_api_documents.py (the VARIANT document shape) are globbed by every API pipeline,
+but each guards on the pipeline `silver_shape` configuration and no-ops when not
+selected — so only the chosen shape materializes (no empty unused table). Default-absent
+=> "records" => content/people/blog are byte-for-byte unchanged.
 """
 
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 from pyspark.sql.types import ArrayType, MapType, StringType
 
+SILVER_SHAPE = spark.conf.get("silver_shape", "records")
 
-@dp.temporary_view()
-def silver_api_records_parsed():
-    """Parse + explode bronze responses into one row per API record (CDC source).
+if SILVER_SHAPE == "records":
 
-    Bodies are JSON — a single object or an array. Try array first; `from_json`
-    returns NULL when the cast doesn't fit, so the COALESCE picks the right shape
-    per row without inspecting endpoint-by-endpoint. Nested objects come through as
-    a single map; downstream consumers re-parse `record_json` with a per-endpoint
-    schema. This is a streaming view (the CDC flow reads it incrementally).
-    """
-    bronze = spark.readStream.table("bronze_api_responses")
+    @dp.temporary_view()
+    def silver_api_records_parsed():
+        """Parse + explode bronze responses into one row per API record (CDC source).
 
-    parsed = bronze.withColumn(
-        "_records_array",
-        F.from_json(F.col("response_body"), ArrayType(MapType(StringType(), StringType()))),
-    ).withColumn(
-        "_records_single",
-        F.from_json(F.col("response_body"), MapType(StringType(), StringType())),
+        Bodies are JSON — a single object or an array. Try array first; `from_json`
+        returns NULL when the cast doesn't fit, so the COALESCE picks the right shape
+        per row without inspecting endpoint-by-endpoint. Nested objects come through as
+        a single map; downstream consumers re-parse `record_json` with a per-endpoint
+        schema. This is a streaming view (the CDC flow reads it incrementally).
+        """
+        bronze = spark.readStream.table("bronze_api_responses")
+
+        parsed = bronze.withColumn(
+            "_records_array",
+            F.from_json(F.col("response_body"), ArrayType(MapType(StringType(), StringType()))),
+        ).withColumn(
+            "_records_single",
+            F.from_json(F.col("response_body"), MapType(StringType(), StringType())),
+        )
+
+        return (
+            parsed.withColumn(
+                "_records",
+                F.coalesce(
+                    F.col("_records_array"),
+                    F.array(F.col("_records_single")),
+                ),
+            )
+            .withColumn("record", F.explode_outer("_records"))
+            .filter(F.col("record").isNotNull())
+            .select(
+                F.col("endpoint"),
+                F.col("url"),
+                F.col("status_code"),
+                F.col("fetched_at"),
+                F.col("_ingested_at"),
+                F.col("ingest_date"),
+                F.col("run_id"),
+                F.to_json(F.col("record")).alias("record_json"),
+                F.col("record")["id"].alias("record_id"),
+            )
+        )
+
+    # Empty target for the AUTO CDC flow. Expectations evaluate against the rows being
+    # applied (which carry every column the parsed view selected), so they may reference
+    # status_code / record_json / record_id. `has_record_key` guards the CDC key (SCD1
+    # cannot key on NULL); `successful_response` drops non-2xx; `body_was_parseable` warns.
+    dp.create_streaming_table(
+        name="silver_api_records",
+        comment=(
+            "Current-state API records (AUTO CDC, SCD Type 1): one row per "
+            "(endpoint, record_id), holding the latest snapshot by fetched_at. "
+            "Scheduled re-runs upsert in place — no duplicate accumulation."
+        ),
+        cluster_by=["endpoint", "record_id"],
+        table_properties={
+            "quality": "silver",
+            # Row tracking lets the deterministic gold MV refresh incrementally on serverless.
+            "delta.enableRowTracking": "true",
+        },
+        expect_all_or_drop={
+            "successful_response": "status_code BETWEEN 200 AND 299",
+            "has_record_key": "record_id IS NOT NULL",
+        },
+        expect_all={"body_was_parseable": "record_json IS NOT NULL"},
     )
 
-    return (
-        parsed.withColumn(
-            "_records",
-            F.coalesce(
-                F.col("_records_array"),
-                F.array(F.col("_records_single")),
-            ),
-        )
-        .withColumn("record", F.explode_outer("_records"))
-        .filter(F.col("record").isNotNull())
-        .select(
-            F.col("endpoint"),
-            F.col("url"),
-            F.col("status_code"),
-            F.col("fetched_at"),
-            F.col("_ingested_at"),
-            F.col("ingest_date"),
-            F.col("run_id"),
-            F.to_json(F.col("record")).alias("record_json"),
-            F.col("record")["id"].alias("record_id"),
-        )
+    dp.create_auto_cdc_flow(
+        target="silver_api_records",
+        source="silver_api_records_parsed",
+        keys=["endpoint", "record_id"],
+        sequence_by="fetched_at",  # latest fetch wins; SCD Type 1 (default) keeps current state
     )
-
-
-# Empty target for the AUTO CDC flow. Expectations evaluate against the rows being
-# applied (which carry every column the parsed view selected), so they may reference
-# status_code / record_json / record_id. `has_record_key` guards the CDC key (SCD1
-# cannot key on NULL); `successful_response` drops non-2xx; `body_was_parseable` warns.
-dp.create_streaming_table(
-    name="silver_api_records",
-    comment=(
-        "Current-state API records (AUTO CDC, SCD Type 1): one row per "
-        "(endpoint, record_id), holding the latest snapshot by fetched_at. "
-        "Scheduled re-runs upsert in place — no duplicate accumulation."
-    ),
-    cluster_by=["endpoint", "record_id"],
-    table_properties={
-        "quality": "silver",
-        # Row tracking lets the deterministic gold MV refresh incrementally on serverless.
-        "delta.enableRowTracking": "true",
-    },
-    expect_all_or_drop={
-        "successful_response": "status_code BETWEEN 200 AND 299",
-        "has_record_key": "record_id IS NOT NULL",
-    },
-    expect_all={"body_was_parseable": "record_json IS NOT NULL"},
-)
-
-dp.create_auto_cdc_flow(
-    target="silver_api_records",
-    source="silver_api_records_parsed",
-    keys=["endpoint", "record_id"],
-    sequence_by="fetched_at",  # latest fetch wins; SCD Type 1 (default) keeps current state
-)

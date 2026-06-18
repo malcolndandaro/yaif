@@ -64,11 +64,14 @@ yaif/
 │                                     # include glob is resources/*/*.yml (note the module subdir level)
 ├── resources/
 │   ├── api/                          # API module — ONE file per business domain
-│   │   ├── content_domain.yml        #   schema yaif_content + pipeline + job (posts, comments, albums, photos)
-│   │   └── people_domain.yml         #   schema yaif_people  + pipeline + job (users, todos)
+│   │   ├── content_domain.yml        #   schema yaif_content + pipeline + job (posts, comments, albums, photos) — GET, connection auth
+│   │   ├── people_domain.yml         #   schema yaif_people  + pipeline + job (users, todos) — GET, connection auth
+│   │   └── echo_post_demo.yml        #   data-safe POST+body+Basic-auth+VARIANT demo (postman-echo, mock creds; silver_shape=document)
 │   └── files/
 │       └── demo.yml                  # files module self-contained demo (MANAGED volume + synthetic seeder) — in glob, deploys cleanly
 ├── examples/                         # activate-by-moving units — OUTSIDE the include glob (need external setup)
+│   ├── api/epm_domain.yml            #   Oracle EPM exportdataslice template — CUSTOMER-RUN-ONLY (basic_secret + POST + silver_shape=document, placeholder host)
+│   ├── api/control_table.{csv,sql}   #   API endpoint control table (now incl. optional body/auth_mode/silver_shape columns)
 │   ├── sqlserver/orders_cdc.yml      #   Lakeflow Connect CDC: continuous gateway + ingestion + job (needs a UC SQLSERVER connection + CDC/CT on source)
 │   ├── sqlserver/orders_query.yml    #   Lakeflow Connect QUERY-BASED: cursor-driven ingestion + scheduled job, NO gateway (use when source can't enable CDC/CT)
 │   └── files/erp_parquet.yml         #   real file feed: schema + EXTERNAL volume + pipeline + job (needs a UC external location)
@@ -77,9 +80,10 @@ yaif/
     │   ├── fetch_api_responses.py    # API: threaded UC-connection fetch -> Delta landing table
     │   └── seed_demo_parquet.py      # files demo: writes synthetic Parquet into the demo volume (stands in for a connector)
     ├── transformations/              # API SDP pipeline source (raw .py, NOT notebooks); pipeline globs ../../src/transformations/**
-    │   ├── bronze_api_responses.py   #   streaming read from landing table
-    │   ├── silver_api_records.py     #   JSON parse + explode + quality expectations
-    │   └── gold_api_metrics.py       #   2 MVs: endpoint health, daily counts
+    │   ├── bronze_api_responses.py   #   streaming read from landing table (+ response_variant VARIANT via try_parse_json)
+    │   ├── silver_api_records.py     #   records shape (default): JSON parse + explode + quality; guards on silver_shape=="records"
+    │   ├── silver_api_documents.py   #   document shape: one VARIANT row per response, keyed (endpoint, run_id); guards on silver_shape=="document"
+    │   └── gold_api_metrics.py       #   2 MVs: endpoint health (bronze), daily counts (silver, follows silver_shape)
     └── files/                        # FILES SDP pipeline source; pipeline globs ../../src/files/** (sibling of transformations/, so API glob never picks it up)
         ├── bronze_cloud_files.py     #   Auto Loader cloudFiles stream from a UC Volume + file lineage
         ├── silver_cloud_files.py     #   quality (rescued-data) + optional dedup_keys
@@ -202,6 +206,24 @@ yaif/
    across **multiple gateway-ingestion pairs** publishing into the same schema; the docs
    do NOT document one gateway feeding many ingestion pipelines, so don't assume it.
    The commented second pair in `examples/sqlserver/orders_cdc.yml` shows the split.
+9. **A UC HTTP connection CANNOT carry clean HTTP Basic auth** (runtime-verified on the
+   sandbox). It force-prefixes `Bearer ` to its credential, and a custom `Authorization`
+   header passed to `http_request(... headers=...)` is **merged/prepended** with the
+   connection's own auth (→ a malformed `Bearer dummy,Basic …`), not sent clean. You
+   also cannot create a host-only (no-auth) connection — an auth option is mandatory at
+   create time. Non-auth custom headers (`Content-Type`, `X-*`) DO pass through. ⇒ For
+   Basic-auth APIs (Oracle EPM `exportdataslice`), the fetch job uses
+   **`auth_mode: basic_secret`** — direct Python `requests` building
+   `Authorization: Basic base64(user:pass)` from `dbutils.secrets.get(scope, key)`,
+   bypassing the proxy. `auth_mode: connection` (the default, content/people) keeps using
+   `serving_endpoints.http_request` for Bearer/OAuth. The fetch job is now method/body
+   aware in BOTH modes (POST + JSON body work through the connection too — only custom
+   *auth* is stripped). VARIANT-shaped (semi-structured) responses land via
+   `silver_shape: document` (`silver_api_documents`) instead of the default
+   `silver_shape: records` (`silver_api_records`); both silver files guard on the
+   pipeline `silver_shape` config and no-op when not selected. The data-safe demo of all
+   of this is `resources/api/echo_post_demo.yml`; the real EPM template (out of glob,
+   customer-run-only) is `examples/api/epm_domain.yml`. See README "Playbook A2".
 
 ## How to onboard a new API domain
 

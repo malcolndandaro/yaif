@@ -20,3 +20,11 @@ build/
 
 # Engagement-specific artifacts — not part of the reusable framework
 reports/
+
+# Secrets / customer-provided artifacts — NEVER commit (may contain plaintext creds)
+# e.g. exported API client collections often embed usernames/passwords/tokens
+*.postman_collection.json
+*.postman_environment.json
+secrets/
+*.secrets.*
+*credentials*.json

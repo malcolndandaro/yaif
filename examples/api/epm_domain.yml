@@ -1,0 +1,143 @@
+# =============================================================================
+# CUSTOMER-RUN-ONLY — do NOT enable in the SA sandbox; never run exportdataslice here.
+# =============================================================================
+# Oracle EPM (Hyperion Planning) exportdataslice template for the YAIF API module.
+# It demonstrates the POST + JSON body + Basic-auth + VARIANT capability against a
+# REAL EPM host — which is why it is a CUSTOMER-RUN-ONLY template and lives OUTSIDE
+# the bundle include glob (resources/*/*.yml). It never deploys or runs from this repo.
+#
+#   * The capability is PROVEN data-safe against a public mock in
+#     resources/api/echo_post_demo.yml (postman-echo, mock creds). That is what the SA
+#     sandbox runs. THIS file is the customer's to run in THEIR workspace against THEIR
+#     EPM, with THEIR credentials — exportdataslice returns planning data and must never
+#     be called from the SA sandbox.
+#   * NO real EPM host or credentials are committed. api_base_url is ${var.epm_host} (a
+#     placeholder var defaulting to https://REPLACE-ME.example.com) and the username/
+#     password come from a customer-managed UC secret scope (${var.epm_secret_scope}).
+#
+# WHY a UC HTTP connection won't work here (CLAUDE.md gotcha #9): EPM uses HTTP Basic
+# auth, and a UC HTTP connection force-prefixes "Bearer " / merges its own credential
+# into the Authorization header, so a clean `Authorization: Basic ...` is impossible
+# through http_request. auth_mode: basic_secret bypasses the proxy with direct requests.
+#
+# -----------------------------------------------------------------------------
+# ACTIVATION (customer, in the customer's workspace — one-time, then move this file)
+# -----------------------------------------------------------------------------
+# 1. Create the secret scope with the customer's EPM credentials (never the SA's):
+#      databricks secrets create-scope epm_secrets
+#      databricks secrets put-secret epm_secrets epm_username --string-value <epm-user>
+#      databricks secrets put-secret epm_secrets epm_password --string-value <epm-pass>
+# 2. Set the vars in databricks.yml (or pass --var):
+#      epm_host         = https://<your-epm-host>            # e.g. https://planning-<tenant>.epm.<region>.oraclecloud.com
+#      epm_secret_scope = epm_secrets
+# 3. Edit the gridDefinition body below to your application / plan type / POV.
+#    Set the path to your app's exportdataslice endpoint.
+# 4. Move this file:  examples/api/epm_domain.yml  ->  resources/api/epm_domain.yml
+#    (no databricks.yml edits beyond the vars — the target mode sets the pipeline's
+#     `development` flag; see gotcha #1.)
+# 5. databricks bundle deploy && databricks bundle run epm_customer_fetch_and_pipeline
+# -----------------------------------------------------------------------------
+resources:
+  schemas:
+    epm_schema:
+      catalog_name: ${var.catalog}
+      name: yaif_epm
+      comment: "YAIF API module — Oracle EPM exportdataslice (CUSTOMER-RUN-ONLY)"
+
+  pipelines:
+    epm_ingestion:
+      name: "[${bundle.target}] yaif-api-epm"
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.epm_schema.name}
+      serverless: true
+      photon: true
+      libraries:
+        - glob:
+            include: ../../src/transformations/**
+      configuration:
+        landing_table: "${var.catalog}.${resources.schemas.epm_schema.name}.raw_api_responses"
+        # EPM grids are arbitrary nested JSON (pov/columns/rows/data, no per-record id),
+        # so they land as ONE VARIANT row per response in silver_api_documents.
+        silver_shape: "document"
+      continuous: false
+      notifications:
+        - email_recipients:
+            - ${workspace.current_user.userName}
+          alerts:
+            - on-update-failure
+            - on-update-fatal-failure
+      permissions:
+        - level: CAN_VIEW
+          group_name: ${var.viewers_group}
+
+  jobs:
+    epm_customer_fetch_and_pipeline:
+      name: "[${bundle.target}] yaif-api-epm (CUSTOMER-RUN-ONLY)"
+      description: >-
+        CUSTOMER-RUN-ONLY — never run exportdataslice in the SA sandbox.
+        Oracle EPM exportdataslice: POST gridDefinition (Basic auth) -> VARIANT silver.
+      tasks:
+        - task_key: fetch
+          notebook_task:
+            notebook_path: ../../src/jobs/fetch_api_responses.py
+            base_parameters:
+              # Basic-auth via direct requests (NOT a UC connection — see header).
+              auth_mode: "basic_secret"
+              # Placeholder host — set var.epm_host in the customer workspace; NEVER commit
+              # a real EPM host. Default resolves to https://REPLACE-ME.example.com so
+              # `bundle validate` passes without pointing at any live system.
+              api_base_url: ${var.epm_host}
+              secret_scope: ${var.epm_secret_scope}
+              secret_key_username: "epm_username"
+              secret_key_password: "epm_password"
+              # exportdataslice POST. EDIT the path + gridDefinition to your application,
+              # plan type, and the slice (POV / rows / columns) you want to export.
+              api_endpoints_json: |
+                [
+                  {
+                    "name": "exportdataslice",
+                    "path": "/HyperionPlanning/rest/v3/applications/<APP>/plantypes/<PLANTYPE>/exportdataslice",
+                    "method": "POST",
+                    "body": {
+                      "exportPlanningData": false,
+                      "gridDefinition": {
+                        "suppressMissingBlocks": true,
+                        "pov": {"dimensions": ["Year"], "members": [["FY24"]]},
+                        "columns": [{"dimensions": ["Period"], "members": [["Jan", "Feb"]]}],
+                        "rows": [{"dimensions": ["Account"], "members": [["Revenue"]]}]
+                      }
+                    }
+                  }
+                ]
+              landing_table: "${var.catalog}.${resources.schemas.epm_schema.name}.raw_api_responses"
+              request_concurrency: ${var.request_concurrency}
+          environment_key: fetch_env
+          # Retry infra-level failures (e.g. environment build) and bound runtime — the
+          # in-code tenacity retries only cover HTTP calls, not task setup.
+          max_retries: 2
+          timeout_seconds: 3600
+        - task_key: run_pipeline
+          depends_on:
+            - task_key: fetch
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.epm_ingestion.id}
+      environments:
+        - environment_key: fetch_env
+          spec:
+            client: "2"
+            dependencies:
+              - "tenacity>=8.2.0"
+              - "requests>=2.31.0"
+              # Floor must exceed the serverless-preinstalled SDK, or pip skips the
+              # upgrade and serving_endpoints.http_request() doesn't exist.
+              - "databricks-sdk>=0.50.0"
+      # No `schedule:` on purpose — the customer adds a cron only after a first manual,
+      # reviewed run. This template ships disabled-by-not-scheduling and out-of-glob.
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}
+      permissions:
+        - level: CAN_VIEW
+          group_name: ${var.viewers_group}

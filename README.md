@@ -347,6 +347,98 @@ then deploy. (See [`scripts/README.md`](scripts/README.md) for the full round-tr
 Framework code written: **zero**. Adding endpoints later = edit the control table +
 re-run the generator (or just `INSERT` if you adopt the runtime-read option above).
 
+## Playbook A2 — POST / body / Basic-auth / semi-structured (VARIANT) APIs
+
+Playbook A handles GET endpoints through a UC HTTP connection. Some APIs need more:
+a **POST** with a JSON **body**, **HTTP Basic auth**, and a response that is arbitrary
+**nested JSON** (no flat array of records). Oracle EPM's `exportdataslice` is the
+motivating case. The same shared `src/` code handles all of it — you change config, not
+code. The data-safe, deployable demo of this whole path is
+[`resources/api/echo_post_demo.yml`](resources/api/echo_post_demo.yml) (postman-echo,
+mock creds — no customer data).
+
+**1. Per-endpoint request specs.** Instead of the `api_endpoints` CSV (GET paths), a
+domain can pass `api_endpoints_json` — a JSON array of specs, each
+`{"path", "method", "body"(obj), "headers"(map), "name"}` (all but `path` optional). It
+**overrides** `api_endpoints` when present; a bare `api_endpoints` CSV still means GET,
+no body (fully backward compatible). The generator emits the CSV when every row is
+GET-with-no-body and `api_endpoints_json` otherwise — so existing GET domains are
+byte-for-byte unchanged.
+
+**2. Auth mode.** A new `auth_mode` base_parameter picks the transport:
+
+| `auth_mode` | Transport | Use for |
+|---|---|---|
+| `connection` (default) | `serving_endpoints.http_request(conn=…)` — UC HTTP connection, now method/body aware | Bearer / OAuth M2M APIs (the content/people demos). Keeps UC governance. |
+| `basic_secret` | Direct Python `requests` with `Authorization: Basic base64(user:pass)` from `dbutils.secrets` | HTTP Basic-auth APIs (Oracle EPM). |
+
+> **Why Basic auth can't ride the UC connection.** A UC HTTP connection force-prefixes
+> `Bearer ` to its credential and merges connection-auth into the `Authorization` header,
+> and you cannot create a host-only (no-auth) connection — so a clean `Authorization:
+> Basic …` is impossible through `http_request` (runtime-verified). `basic_secret` mode
+> bypasses the proxy. (Strategic alternative: if the API supports OAuth2 M2M — e.g.
+> Oracle via OCI IAM/IDCS — use `auth_mode: connection` with OAuth on the connection to
+> restore UC-connection governance.) `basic_secret` needs `api_base_url` (scheme+host),
+> `secret_scope`, `secret_key_username`, and `secret_key_password`; the password ALWAYS
+> comes from a secret, never inline.
+
+**3. VARIANT landing for nested JSON (`silver_shape`).** Bronze now derives a
+`response_variant VARIANT` column with `try_parse_json` (NULL on bad JSON — never fails
+the streaming batch), alongside the raw `response_body` STRING (loss-proof audit). The
+silver layer forks on a per-pipeline `silver_shape` configuration:
+
+| `silver_shape` | Silver table | Shape |
+|---|---|---|
+| `records` (default) | `silver_api_records` | one row per record, exploded from an array, keyed `(endpoint, record_id)` |
+| `document` | `silver_api_documents` | one VARIANT row per response, keyed `(endpoint, run_id)` — no per-record id needed |
+
+Both `src/transformations/silver_api_records.py` and `silver_api_documents.py` are
+globbed by every API pipeline, but each guards on `silver_shape` and no-ops when not
+selected, so only the chosen table is created. `gold_api_records_per_day` follows the
+shape automatically; `gold_api_endpoint_health` reads bronze, so it is shape-agnostic.
+
+Navigate a `document`-shape grid off the VARIANT with the `:` path operator and
+`variant_explode`:
+
+```sql
+SELECT d.endpoint, d.run_id,
+       d.response_variant:gridDefinition.suppressMissingBlocks::boolean AS suppress,
+       r.value:members AS row_members
+FROM   yaif_echo.silver_api_documents d,
+LATERAL variant_explode(d.response_variant:gridDefinition.rows) AS r;
+```
+
+**4. Try the demo (data-safe).** Create the mock secret scope, deploy, run:
+
+```bash
+databricks secrets create-scope yaif_api
+databricks secrets put-secret yaif_api mock_username --string-value postman
+databricks secrets put-secret yaif_api mock_password --string-value password
+databricks bundle deploy -t dev
+databricks bundle run echo_post_demo_fetch_and_pipeline -t dev
+```
+
+It POSTs an EPM-shaped `gridDefinition` to `postman-echo.com/post`, lands the echoed
+nested JSON as a VARIANT, and builds `silver_api_documents` + gold — proving POST + body
++ Basic + VARIANT end-to-end with zero customer data.
+
+### Activate the Oracle EPM domain (CUSTOMER-RUN-ONLY)
+
+[`examples/api/epm_domain.yml`](examples/api/epm_domain.yml) is the real
+`exportdataslice` template. It is **out of the deploy glob and never run from this repo**
+— `exportdataslice` returns planning data and must never be called from the SA sandbox.
+The capability is proven by the echo demo above; this file is the **customer's** to run
+in **their** workspace. No real EPM host or credentials live in the repo (`api_base_url`
+is `${var.epm_host}`, defaulting to a placeholder; creds come from a customer-managed
+secret scope). Activate it in the customer workspace:
+
+1. Create the secret scope with the customer's EPM creds (`epm_username`/`epm_password`).
+2. Set `epm_host` + `epm_secret_scope` vars; edit the `gridDefinition` body + path.
+3. Move `examples/api/epm_domain.yml` → `resources/api/epm_domain.yml`.
+4. `databricks bundle deploy && databricks bundle run epm_customer_fetch_and_pipeline`.
+
+Full steps are in the file header.
+
 ## Playbook B — SQL Server (CDC or query-based via Lakeflow Connect)
 
 A managed connector — YAIF supplies only conventions, no custom code. Two sibling

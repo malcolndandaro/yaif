@@ -1,7 +1,18 @@
-"""Gold: per-endpoint freshness, volume, and error-rate metrics for monitoring."""
+"""Gold: per-endpoint freshness, volume, and error-rate metrics for monitoring.
+
+`gold_api_endpoint_health` reads BRONZE, so it works for every silver shape unchanged.
+`gold_api_records_per_day` counts the silver grain, so it follows the pipeline's
+`silver_shape`: in the default "records" shape it counts `silver_api_records` (one row
+per record); in the "document" shape it counts `silver_api_documents` (one row per
+response). The MV name + grain (endpoint x ingest_date count) stay the same either way,
+so dashboards bind to one table regardless of shape.
+"""
 
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
+
+SILVER_SHAPE = spark.conf.get("silver_shape", "records")
+SILVER_TABLE = "silver_api_documents" if SILVER_SHAPE == "document" else "silver_api_records"
 
 
 @dp.materialized_view(
@@ -45,18 +56,19 @@ def gold_api_endpoint_health():
 @dp.materialized_view(
     name="gold_api_records_per_day",
     comment=(
-        "Current record count by endpoint, bucketed by the date each record was last "
-        "fetched (ingest_date). Silver is SCD Type 1 (deduped), so every record is counted "
-        "exactly once — this is the live record distribution, not cumulative re-fetch volume."
+        "Current count by endpoint, bucketed by the date each row was last fetched "
+        "(ingest_date). Silver is SCD Type 1 (deduped), so every row is counted exactly "
+        "once — the live distribution, not cumulative re-fetch volume. Grain follows "
+        "silver_shape: one row per record (records) or per response (document)."
     ),
     cluster_by=["ingest_date"],
     table_properties={"quality": "gold"},
 )
 def gold_api_records_per_day():
-    # Reads the deduped silver, so the deterministic aggregate can refresh incrementally
-    # on serverless (silver sets delta.enableRowTracking).
+    # Reads the deduped silver for the pipeline's shape, so the deterministic aggregate
+    # can refresh incrementally on serverless (silver sets delta.enableRowTracking).
     return (
-        spark.read.table("silver_api_records")
+        spark.read.table(SILVER_TABLE)
         .groupBy("ingest_date", "endpoint")
         .agg(F.count("*").alias("record_count"))
     )

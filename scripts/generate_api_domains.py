@@ -10,7 +10,13 @@ orchestration job — so there is no new framework code and nothing magic to lea
 
 The control table has one row per endpoint, with these columns:
 
-    domain, endpoint_name, path, method, params, schedule, enabled
+    domain, endpoint_name, path, method, params, schedule, enabled,
+    body, auth_mode, silver_shape
+
+`body`/`auth_mode`/`silver_shape` are OPTIONAL trailing columns — older 7-column
+tables still parse (the generator fills them via dict.get with safe defaults). The
+last three are read but default to GET / connection / records, so a table of plain
+GET rows generates byte-for-byte the same YAML as before.
 
 Read it from either source (they are kept in sync):
 
@@ -23,8 +29,12 @@ Read it from either source (they are kept in sync):
 
 What it does, per domain:
   * keeps only rows where `enabled` is true
-  * joins their `path` values (with `?params` appended when present) into the
-    comma-separated `api_endpoints` string the fetch job already reads
+  * collects each row as a request spec {path(+?params), method, body?}
+  * when EVERY spec is a GET with no body, emits the comma-separated `api_endpoints`
+    CSV string the fetch job has always read (byte-for-byte unchanged); when any spec
+    is non-GET or carries a body, emits `api_endpoints_json` (a JSON array of specs)
+  * threads per-domain `auth_mode` (connection | basic_secret) and `silver_shape`
+    (records | document) — both default-safe and omitted from the YAML when default
   * fills the domain's job `schedule` from the `schedule` column
   * writes <out-dir>/<domain>.yml
 
@@ -32,22 +42,27 @@ The generator does NOT write into resources/ — it writes to a preview director
 (default: build/generated_api/) so you can review the YAML, then move the files
 you want into resources/api/ and `databricks bundle deploy`.
 
-Note on `method`/`params`: the shared fetch job (src/jobs/fetch_api_responses.py)
-issues GET requests by path; `params` is appended to the path as a query string.
-Non-GET rows are reported and skipped — extend the fetch contract first if you
-need them.
+Note on auth: `auth_mode: basic_secret` needs an `api_base_url` and a secret scope
+(see resources/api/echo_post_demo.yml / examples/api/epm_domain.yml). The generator
+emits a TODO placeholder for those so you fill them in (never commit real hosts/creds).
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import sys
 from pathlib import Path
 
-# Columns expected in the control table, in order.
-COLUMNS = ["domain", "endpoint_name", "path", "method", "params", "schedule", "enabled"]
+# Columns expected in the control table, in order. The first 7 are required; `body`,
+# `auth_mode`, and `silver_shape` are optional trailing columns (read via dict.get with
+# safe defaults), so a 7-column table still parses.
+COLUMNS = [
+    "domain", "endpoint_name", "path", "method", "params", "schedule", "enabled",
+    "body", "auth_mode", "silver_shape",
+]
 
 # Canonical domain template. Mirrors resources/api/content_domain.yml exactly so
 # generated files are indistinguishable from hand-written ones. Placeholders use
@@ -79,7 +94,7 @@ resources:
             include: ../../src/transformations/**
       configuration:
         landing_table: "${var.catalog}.${resources.schemas.__DOMAIN___schema.name}.raw_api_responses"
-      continuous: false
+__SILVER_SHAPE_CONFIG__      continuous: false
       notifications:
         - email_recipients:
             - ${workspace.current_user.userName}
@@ -100,8 +115,7 @@ resources:
             notebook_path: ../../src/jobs/fetch_api_responses.py
             base_parameters:
               api_connection: ${var.api_connection}
-              api_endpoints: "__ENDPOINTS__"
-              landing_table: "${var.catalog}.${resources.schemas.__DOMAIN___schema.name}.raw_api_responses"
+__ENDPOINTS_BLOCK____AUTH_BLOCK__              landing_table: "${var.catalog}.${resources.schemas.__DOMAIN___schema.name}.raw_api_responses"
               request_concurrency: ${var.request_concurrency}
           environment_key: fetch_env
           # Retry infra-level failures (e.g. environment build) and bound runtime — the
@@ -159,26 +173,51 @@ def read_table(fqn: str, warehouse_id: str, profile: str | None) -> list[dict]:
     except ImportError:
         sys.exit("ERROR: --table needs the Databricks SDK. Run: pip install databricks-sdk")
 
-    cols = ", ".join(COLUMNS)
-    resp = WorkspaceClient().statement_execution.execute_statement(
+    # SELECT * so older 7-column tables (without body/auth_mode/silver_shape) still work;
+    # map by the actual returned column names and let build_domains apply defaults.
+    client = WorkspaceClient()
+    resp = client.statement_execution.execute_statement(
         warehouse_id=warehouse_id,
-        statement=f"SELECT {cols} FROM {fqn}",
+        statement=f"SELECT * FROM {fqn}",
         wait_timeout="50s",
     )
     if resp.status.state != StatementState.SUCCEEDED:
         sys.exit(f"ERROR: query failed: {resp.status.state} {resp.status.error}")
+    col_names = [c.name for c in resp.manifest.schema.columns] if resp.manifest else COLUMNS
     data = resp.result.data_array if resp.result else []
-    return [dict(zip(COLUMNS, row)) for row in data]
+    return [dict(zip(col_names, row)) for row in data]
+
+
+def _resolve_domain_setting(entry: dict, key: str, value: str, domain: str, default: str) -> None:
+    """Set a per-domain setting (auth_mode / silver_shape), warning on a conflict.
+
+    Auth/shape are per-domain, but live on each endpoint row for table simplicity. The
+    first non-default value wins; a differing later value is a config error worth flagging.
+    """
+    value = (value or "").strip().lower()
+    if not value or value == default:
+        return
+    if entry[key] not in (default, value):
+        print(
+            f"  ! domain '{domain}' has conflicting {key} "
+            f"('{entry[key]}' vs '{value}'); using the first. {key} is per-domain — "
+            f"split the domain if they must differ."
+        )
+        return
+    entry[key] = value
 
 
 def build_domains(rows: list[dict]) -> tuple[dict, dict]:
     """Group enabled rows by domain. Returns (domains, stats).
 
-    domains[name] = {"endpoints": ["/posts", "/comments?postId=1", ...], "schedule": "<cron>"}
+    domains[name] = {
+        "endpoints": [{"path": "/posts", "method": "GET"}, ...],  # request specs
+        "schedule": "<cron>", "auth_mode": "connection", "silver_shape": "records",
+    }
     """
     domains: dict[str, dict] = {}
     skipped_disabled = 0
-    skipped_method = 0
+    non_get_endpoints = 0
 
     for row in rows:
         domain = (row.get("domain") or "").strip()
@@ -189,18 +228,28 @@ def build_domains(rows: list[dict]) -> tuple[dict, dict]:
             skipped_disabled += 1
             continue
 
-        method = (row.get("method") or "GET").strip().upper()
-        if method != "GET":
-            print(f"  ! skipping {domain} {path}: method={method} (fetch job is GET-only)")
-            skipped_method += 1
-            continue
-
+        method = (row.get("method") or "GET").strip().upper() or "GET"
         params = (row.get("params") or "").strip()
-        endpoint = f"{path}?{params}" if params else path
+        full_path = f"{path}?{params}" if params else path
+        body_raw = (row.get("body") or "").strip()
+
+        spec: dict = {"path": full_path, "method": method}
+        if body_raw:
+            try:
+                spec["body"] = json.loads(body_raw)
+            except json.JSONDecodeError:
+                # Keep the raw string body (the fetch job sends it as-is).
+                spec["body"] = body_raw
+        if method != "GET" or body_raw:
+            non_get_endpoints += 1
+
+        entry = domains.setdefault(
+            domain,
+            {"endpoints": [], "schedule": "", "auth_mode": "connection", "silver_shape": "records"},
+        )
+        entry["endpoints"].append(spec)
 
         schedule = (row.get("schedule") or "").strip()
-        entry = domains.setdefault(domain, {"endpoints": [], "schedule": ""})
-        entry["endpoints"].append(endpoint)
         if schedule:
             if entry["schedule"] and entry["schedule"] != schedule:
                 print(
@@ -211,18 +260,63 @@ def build_domains(rows: list[dict]) -> tuple[dict, dict]:
             elif not entry["schedule"]:
                 entry["schedule"] = schedule
 
+        _resolve_domain_setting(entry, "auth_mode", row.get("auth_mode", ""), domain, "connection")
+        _resolve_domain_setting(entry, "silver_shape", row.get("silver_shape", ""), domain, "records")
+
     stats = {
         "rows": len(rows),
         "enabled_endpoints": sum(len(d["endpoints"]) for d in domains.values()),
         "domains": len(domains),
         "skipped_disabled": skipped_disabled,
-        "skipped_method": skipped_method,
+        "non_get_endpoints": non_get_endpoints,
     }
     return domains, stats
 
 
-def render(domain: str, endpoints: list[str], schedule: str) -> str:
+def _endpoints_block(endpoints: list[dict]) -> str:
+    """Render the fetch endpoints base_parameter.
+
+    GET-only with no body => the legacy `api_endpoints` CSV line (byte-for-byte
+    identical to the historical generator output, so generated_sample/blog.yml is
+    preserved). Otherwise => an `api_endpoints_json` block-scalar holding the specs.
+    """
+    all_get_no_body = all(
+        ep.get("method", "GET").upper() == "GET" and "body" not in ep for ep in endpoints
+    )
+    if all_get_no_body:
+        csv = ",".join(ep["path"] for ep in endpoints)
+        return f'              api_endpoints: "{csv}"\n'
+    # Pretty-print the JSON array as a YAML block scalar (|), indented under the key.
+    pretty = json.dumps(endpoints, indent=2)
+    indented = "\n".join("                " + line for line in pretty.splitlines())
+    return f"              api_endpoints_json: |\n{indented}\n"
+
+
+def _auth_block(auth_mode: str) -> str:
+    """Render the auth base_parameters. Empty for the default connection mode."""
+    if auth_mode != "basic_secret":
+        return ""
+    return (
+        '              auth_mode: "basic_secret"\n'
+        "              # TODO: fill these in — never commit a real host or credentials.\n"
+        "              # api_base_url MUST be a scheme+host (e.g. https://host); secrets stay in a UC scope.\n"
+        "              api_base_url: ${var.api_base_url}\n"
+        "              secret_scope: ${var.api_secret_scope}\n"
+        '              secret_key_username: "username"\n'
+        '              secret_key_password: "password"\n'
+    )
+
+
+def _silver_shape_config(silver_shape: str) -> str:
+    """Render the pipeline `silver_shape` configuration line. Empty for default records."""
+    if silver_shape != "document":
+        return ""
+    return '        silver_shape: "document"\n'
+
+
+def render(domain: str, entry: dict) -> str:
     """Render one domain's YAML from the canonical template."""
+    schedule = entry["schedule"]
     if schedule:
         schedule_block = (
             "      schedule:\n"
@@ -234,7 +328,9 @@ def render(domain: str, endpoints: list[str], schedule: str) -> str:
     return (
         TEMPLATE
         .replace("__DOMAIN__", domain)
-        .replace("__ENDPOINTS__", ",".join(endpoints))
+        .replace("__ENDPOINTS_BLOCK__", _endpoints_block(entry["endpoints"]))
+        .replace("__AUTH_BLOCK__", _auth_block(entry["auth_mode"]))
+        .replace("__SILVER_SHAPE_CONFIG__", _silver_shape_config(entry["silver_shape"]))
         .replace("__SCHEDULE_BLOCK__", schedule_block)
     )
 
@@ -278,7 +374,7 @@ def main() -> None:
     for domain in sorted(domains):
         entry = domains[domain]
         out_path = out_dir / f"{domain}.yml"
-        out_path.write_text(render(domain, entry["endpoints"], entry["schedule"]))
+        out_path.write_text(render(domain, entry))
         print(f"  wrote {out_path}  ({len(entry['endpoints'])} endpoints)")
 
     print(
@@ -287,8 +383,11 @@ def main() -> None:
     )
     if stats["skipped_disabled"]:
         print(f"  ({stats['skipped_disabled']} disabled row(s) skipped)")
-    if stats["skipped_method"]:
-        print(f"  ({stats['skipped_method']} non-GET row(s) skipped)")
+    if stats["non_get_endpoints"]:
+        print(
+            f"  ({stats['non_get_endpoints']} non-GET / body endpoint(s) emitted as "
+            "api_endpoints_json)"
+        )
     print("Next: review the files, move the ones you want into resources/api/, then "
           "`databricks bundle deploy`.")
 

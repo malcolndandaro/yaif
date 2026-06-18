@@ -1,0 +1,136 @@
+# Domain: echo_post_demo  (DATA-SAFE demo of the POST + body + Basic-auth + VARIANT path)
+# ============================================================================
+# Self-contained demo of the new API capability against postman-echo (a PUBLIC
+# mock — no signup, no customer data), mirroring how content/people demo the GET
+# path. It proves POST + JSON body + Basic auth + VARIANT landing end-to-end with
+# ZERO customer data, so it ships IN the deploy glob (resources/*/*.yml).
+#
+# What it exercises that content/people do not:
+#   * auth_mode: basic_secret   — direct requests with Authorization: Basic
+#     base64(user:pass) from a UC secret scope. A UC HTTP connection CANNOT carry
+#     clean Basic auth (it force-prefixes "Bearer " / merges connection-auth into
+#     the Authorization header — see CLAUDE.md gotcha #9), so Basic-auth APIs MUST
+#     bypass the proxy. This is the same code path Oracle EPM's exportdataslice needs.
+#   * POST + JSON body       — an EPM-shaped gridDefinition is POSTed to /post.
+#     postman-echo echoes the parsed body back under `json`, so a test can assert
+#     byte-for-byte that the body we sent is the body the server received.
+#   * silver_shape: document — the response is arbitrary nested JSON (no per-record
+#     id), so it lands as ONE VARIANT row in silver_api_documents (not the records
+#     array path). bronze adds response_variant via try_parse_json.
+#
+# PREREQUISITE (one-time, mock creds only — never real EPM creds):
+#   Create the secret scope `yaif_api` with postman-echo's documented test creds:
+#     databricks secrets create-scope yaif_api
+#     databricks secrets put-secret yaif_api mock_username --string-value postman
+#     databricks secrets put-secret yaif_api mock_password --string-value password
+#   (postman-echo /basic-auth accepts postman:password; /post needs no auth but
+#    echoes the Authorization header we send, which proves the Basic header is wired.)
+#
+# Run it:  databricks bundle run echo_post_demo_fetch_and_pipeline -t dev
+# ============================================================================
+resources:
+  schemas:
+    echo_schema:
+      catalog_name: ${var.catalog}
+      name: yaif_echo
+      comment: "YAIF API module — echo_post_demo (POST/body/Basic/VARIANT demo)"
+
+  pipelines:
+    echo_ingestion:
+      name: "[${bundle.target}] yaif-api-echo"
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.echo_schema.name}
+      serverless: true
+      photon: true
+      libraries:
+        - glob:
+            include: ../../src/transformations/**
+      configuration:
+        landing_table: "${var.catalog}.${resources.schemas.echo_schema.name}.raw_api_responses"
+        # Document shape: one VARIANT row per response (silver_api_documents), since an
+        # EPM-style grid has no per-record id. silver_api_records no-ops for this pipeline.
+        silver_shape: "document"
+      continuous: false
+      notifications:
+        - email_recipients:
+            - ${workspace.current_user.userName}
+          alerts:
+            - on-update-failure
+            - on-update-fatal-failure
+      permissions:
+        - level: CAN_VIEW
+          group_name: ${var.viewers_group}
+
+  jobs:
+    echo_post_demo_fetch_and_pipeline:
+      name: "[${bundle.target}] yaif-api-echo"
+      description: "echo_post_demo: POST EPM-shaped body to postman-echo (Basic auth) -> VARIANT silver"
+      tasks:
+        - task_key: fetch
+          notebook_task:
+            notebook_path: ../../src/jobs/fetch_api_responses.py
+            base_parameters:
+              # Basic-auth via direct requests (NOT the UC connection — see header).
+              auth_mode: "basic_secret"
+              api_base_url: "https://postman-echo.com"
+              secret_scope: "yaif_api"
+              secret_key_username: "mock_username"
+              secret_key_password: "mock_password"
+              # One endpoint: POST an EPM-shaped gridDefinition to /post. postman-echo
+              # echoes the parsed body under `json` and the headers under `headers`, so a
+              # test can assert the body round-tripped and Authorization starts with "Basic ".
+              api_endpoints_json: |
+                [
+                  {
+                    "name": "post_grid",
+                    "path": "/post",
+                    "method": "POST",
+                    "body": {
+                      "exportPlanningData": false,
+                      "gridDefinition": {
+                        "suppressMissingBlocks": true,
+                        "pov": {"dimensions": ["Year"], "members": [["FY24"]]},
+                        "columns": [{"dimensions": ["Period"], "members": [["Jan", "Feb"]]}],
+                        "rows": [{"dimensions": ["Account"], "members": [["Revenue"]]}],
+                        "nested": {"a": 1}
+                      }
+                    }
+                  },
+                  {
+                    "name": "basic_auth_gate",
+                    "path": "/basic-auth",
+                    "method": "GET"
+                  }
+                ]
+              landing_table: "${var.catalog}.${resources.schemas.echo_schema.name}.raw_api_responses"
+              request_concurrency: ${var.request_concurrency}
+          environment_key: fetch_env
+          # Retry infra-level failures (e.g. environment build) and bound runtime — the
+          # in-code tenacity retries only cover HTTP calls, not task setup.
+          max_retries: 2
+          timeout_seconds: 3600
+        - task_key: run_pipeline
+          depends_on:
+            - task_key: fetch
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.echo_ingestion.id}
+      environments:
+        - environment_key: fetch_env
+          spec:
+            client: "2"
+            dependencies:
+              - "tenacity>=8.2.0"
+              # basic_secret mode uses requests directly (pin it explicitly here so the
+              # serverless env is deterministic; it is preinstalled but pinning is safe).
+              - "requests>=2.31.0"
+              # Floor must exceed the serverless-preinstalled SDK, or pip skips the
+              # upgrade and serving_endpoints.http_request() doesn't exist.
+              - "databricks-sdk>=0.50.0"
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}
+      permissions:
+        - level: CAN_VIEW
+          group_name: ${var.viewers_group}
