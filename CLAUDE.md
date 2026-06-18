@@ -239,5 +239,7 @@ deploy). A committed sample of the generated output is at
 
 ## Related
 
+- Human-facing guides now live in `docs/` (quickstart, concepts, api-ingestion, files,
+  sqlserver, oracle-epm, troubleshooting); `README.md` is the slim landing page that links into them.
 - See `README.md` for the full onboarding guide, design rationale, the 900-API
   scaling playbook, and the per-module playbooks (A: API, B: SQL Server, C: files).

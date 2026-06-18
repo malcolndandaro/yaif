@@ -1,644 +1,156 @@
 # YAIF — Yet Another Ingestion Framework
 
-Production-grade ingestion patterns for the Databricks Lakehouse, organized as an
-**umbrella repo, not an abstraction layer**: one Asset Bundle, consistent
-conventions (naming, medallion, monitoring, dev/prod targets), independent modules
-per source type. No metadata engine, no wrapper around managed connectors — where
-Databricks already provides a declarative primitive (Lakeflow Connect, SDP), YAIF
-just configures it.
+A Databricks **Lakeflow** reference for landing **REST APIs, files, and SQL Server**
+into Unity Catalog. One Asset Bundle, consistent conventions, a bronze → silver → gold
+medallion per source with **AUTO CDC SCD-1** dedup. Onboarding a new source is a file
+copy — **zero new framework code**.
 
-## Modules
+It's an *umbrella repo, not an abstraction layer*: where Databricks already provides a
+declarative primitive (Lakeflow Connect, SDP), YAIF just configures it. All modules are
+built and verified end-to-end on the sandbox.
 
-| Module | Source type | Status | Mechanism |
+## What's in here
+
+| Module | Source | What it does | Docs |
 |---|---|---|---|
-| `resources/api/` | REST APIs | ✅ built & verified | UC HTTP Connection + thread-pool fetch + SDP medallion |
-| `examples/sqlserver/` (move to `resources/sqlserver/` to activate) | SQL Server CDC | ✅ built & verified | Lakeflow Connect (gateway + ingestion pipeline) — pure config |
-| `src/files/` + `examples/files/` | Files in cloud storage (Parquet/CSV/JSON) — incl. SAP via a connector like Arcosoft | ✅ built & verified (demo) | Auto Loader (`cloudFiles`) reading a UC-governed Volume → SDP bronze/silver/gold |
+| **API** | REST / HTTP APIs (one, or hundreds) | Governed UC HTTP fetch → SDP medallion; control-table driven; GET & POST/body | [docs/api-ingestion.md](docs/api-ingestion.md) |
+| **Files** | Parquet / CSV / JSON in a bucket (incl. SAP via a connector) | Auto Loader (`cloudFiles`) over a UC Volume → SDP medallion | [docs/files.md](docs/files.md) |
+| **SQL Server — CDC** | A SQL Server DB *with* CDC / Change Tracking | Lakeflow Connect: continuous gateway + ingestion; full change & delete history | [docs/sqlserver.md](docs/sqlserver.md) |
+| **SQL Server — query-based** | A SQL Server DB *without* CDC/CT | Lakeflow Connect: scheduled cursor-driven pulls, no gateway | [docs/sqlserver.md](docs/sqlserver.md) |
+| **Oracle EPM** *(example)* | Oracle EPM `exportdataslice` (POST + Basic auth) | Customer-run template for POST/body/Basic-auth APIs | [docs/oracle-epm.md](docs/oracle-epm.md) |
 
-## Why would I use this?
+## Quickstart
 
-Because the alternative is a bespoke notebook per source — and that is exactly the
-thing that does not scale to dozens or hundreds of sources. YAIF gives every source
-the same governed, observable, environment-aware plumbing for free. Here is the API
-module versus a typical hand-rolled ingestion notebook:
+Two paths. **A** proves the framework end-to-end with **zero external setup** — run it
+now. **B** is the worked example of activating a *real* source (Oracle EPM): the exact
+steps a customer follows in their own workspace. Full detail in
+[docs/quickstart.md](docs/quickstart.md).
 
-| Concern | Typical legacy notebook | YAIF API module |
-|---|---|---|
-| Auth | notebook context token / hardcoded | UC HTTP Connection (governed, audited, OAuth M2M capable) |
-| Distribution | serial loop or ad-hoc pandas_udf | `ThreadPoolExecutor` on the endpoint list |
-| Retries | manual / missing | tenacity, exp backoff, retries 5xx + transient |
-| Persistence | often discarded | UC managed Delta landing table |
-| Schema evolution | manual | Delta `mergeSchema=true` on append |
-| Orchestration | none | DABs job + SDP pipeline per domain |
-| Environments | hardcoded host | `targets: dev / prod` with overrides |
-| Observability | none | `gold_api_endpoint_health` MV (success rate, errors, body size) |
-| Failure alerting | none | Email notifications on job + pipeline failure |
+### A — Prove the plumbing (data-safe, runnable now)
 
-The other two modules (SQL Server, files) buy the same consistency without custom
-code — they just configure a managed Databricks primitive (Lakeflow Connect, Auto
-Loader) the same governed, dev/prod-aware way.
-
-## Start here: you received YAIF — now what?
-
-YAIF exists to **accelerate ingestion onboarding** — to turn "we have hundreds of
-sources to land in the lakehouse" into a repeatable, *copy-one-file-per-source*
-workflow instead of a bespoke notebook per source. The loop is always the same:
-
-1. **Set up once** (~5 min) — CLI, a catalog, run a demo to confirm the plumbing.
-2. **Pick your source type** and follow its playbook below.
-3. **Repeat per source / domain** — each new source is a file copy + a few field
-   edits (or one row in a control table). You never write new framework code.
-
-> If you have **900 APIs**, you do *not* create 900 jobs by hand. You group them
-> into ~45 domains, drive the endpoint lists from a control table, and **generate**
-> the per-domain resources from a list. See **Playbook A → "Scale to hundreds/
-> thousands"** for the exact, copy-pasteable steps.
-
-### Step 0 — set up once
+The self-contained **files demo** runs the full Auto Loader → bronze/silver/gold medallion
+over synthetic Parquet — no bucket, no credentials, no connection.
 
 ```bash
-# a) Authenticate the CLI to your workspace
+# 1. Authenticate the CLI to your workspace
 databricks auth login --host https://<your-workspace>.cloud.databricks.com
 
-# b) Get the code and point the bundle at your workspace + an existing catalog
+# 2. Get the code and point the bundle at your workspace + an existing catalog
 git clone <this-repo> && cd yaif
 #    edit databricks.yml → targets.dev.workspace.profile + var.catalog
-#    (or just pass --profile <name> on every command)
+#    (defaults target the sandbox profile `sqlserver-ws`, catalog `yaif`)
 
-# c) Confirm the plumbing with the self-contained files demo (no external setup)
+# 3. Deploy
 databricks bundle deploy -t dev
-databricks bundle run files_demo_seed_and_pipeline
+
+# 4. Run the files demo (zero external setup)
+databricks bundle run files_demo_seed_and_pipeline -t dev
+
+# 5. See rows — in any SQL warehouse
+#      SELECT * FROM <catalog>.yaif_files_demo.silver_cloud_files;
 ```
 
-That demo seeds synthetic Parquet into a managed Volume and runs the full Auto
-Loader → bronze/silver/gold medallion — proving deploy + serverless + SDP work
-before you point at anything real. (The API demo needs one extra line — the
-`yaif_demo_api` connection — see Playbook A.)
-
-### Pick your source type
-
-| Your source is… | Module | Go to |
-|---|---|---|
-| A REST / HTTP API — one, or **hundreds** | API (real code: governed fetch + SDP) | **Playbook A** |
-| A **SQL Server** database (ongoing change capture) | Lakeflow Connect (managed) | **Playbook B** |
-| **Files a tool drops in a bucket** (Parquet/CSV/JSON — e.g. SAP exported by Arcosoft) | Auto Loader (`cloudFiles`) | **Playbook C** |
-
-## Design principles
-
-1. **Umbrella repo, not framework** — modules share conventions and deployment
-   workflow, never code abstractions. The API module has real code; the SQL Server
-   module is ~50 lines of Lakeflow Connect YAML. Wrapping a managed connector in a
-   custom framework only adds indirection.
-2. **One deployable unit per business domain** — each `resources/api/<domain>.yml`
-   is a self-contained schema + pipeline + job. Failure isolation, independent
-   schedules, per-team grants.
-3. **Governed auth via Unity Catalog** — API credentials live in UC HTTP
-   connections (granted, audited, OAuth M2M capable); database credentials live in
-   UC connections used by Lakeflow Connect. No secrets in code.
-
-## Layout
-
-```
-yaif/
-├── databricks.yml                    # bundle + shared variables + targets
-├── resources/
-│   └── api/                          # API module — one file per business domain
-│       ├── content_domain.yml        #   domain unit: schema + pipeline + job
-│       └── people_domain.yml         #   second domain — same pattern
-├── scripts/
-│   ├── generate_api_domains.py       # control table → one resources/api/<domain>.yml per domain
-│   └── README.md                     #   the control-table → generate → deploy round-trip
-├── examples/
-│   ├── api/                          # API scaling helpers (outside the deploy glob)
-│   │   ├── control_table.csv         #   endpoints as a CSV (quick start / local)
-│   │   ├── control_table.sql         #   endpoints as a UC table (governed runtime source of truth)
-│   │   └── generated_sample/         #   committed example of one generated domain YAML
-│   ├── sqlserver/orders_cdc.yml      # Lakeflow Connect scaffold (outside include glob)
-│   └── files/erp_parquet.yml         # files-module domain unit (outside include glob; activate per feed)
-└── src/                              # SHARED module source — never copied per-domain
-    ├── jobs/
-    │   └── fetch_api_responses.py    # API: threaded fetch → Delta landing table
-    ├── transformations/              # API SDP pipeline source (raw .py files)
-    │   ├── bronze_api_responses.py   #   streaming from landing table
-    │   ├── silver_api_records.py     #   JSON parse + explode
-    │   └── gold_api_metrics.py       #   MVs: endpoint health, daily counts
-    └── files/                        # files SDP pipeline source (Auto Loader medallion)
-        ├── bronze_cloud_files.py     #   cloudFiles stream from a UC Volume + file lineage
-        ├── silver_cloud_files.py     #   quality + optional dedup
-        └── gold_cloud_files.py       #   MVs: ingestion health, rows/day
-```
-
-## Data flow (API module, per domain)
-
-```
-                              ┌────────────────────────────────┐
-  REST APIs (n endpoints) ───►│  fetch_api_responses (Job)     │
-                              │  thread pool + tenacity        │
-                              └──────────────┬─────────────────┘
-                                             ▼
-                              ┌────────────────────────────────┐
-                              │  raw_api_responses (Delta)     │
-                              └──────────────┬─────────────────┘
-                                             ▼
-                              ┌────────────────────────────────┐
-                              │  bronze_api_responses (STREAM) │  ← SDP pipeline
-                              └──────────────┬─────────────────┘
-                                             ▼
-                              ┌────────────────────────────────┐
-                              │  silver_api_records  (STREAM)  │   parse/explode/quality
-                              └──────────────┬─────────────────┘
-                                             ▼
-                              ┌────────────────────────────────┐
-                              │  gold_api_endpoint_health (MV) │   success_rate, errors
-                              │  gold_api_records_per_day (MV) │   daily counts
-                              └────────────────────────────────┘
-```
-
-## Prerequisites
-
-| Requirement | Detail |
-|---|---|
-| Databricks CLI | `>= v1.0` (`databricks --version`), authenticated profile (`databricks auth login`) |
-| Workspace | Unity Catalog enabled, serverless jobs **and** serverless pipelines available in the region |
-| Permissions | `USE CATALOG` + `CREATE SCHEMA` on the target catalog; `CREATE CONNECTION` on the metastore (or ask an admin for the connection + `USE CONNECTION` grant) |
-| Network | Workspace egress must reach your API gateway / database (private sources need NCC/private link) |
-| Python deps | None to install — `tenacity` + `databricks-sdk` are declared in each domain job's serverless `environment` spec |
-| `http_request` | DBR 15.4+ / SQL warehouse 2023.40+ (already true on serverless) |
-
-## Demo quick start (public test API)
-
-Create the demo connection once (the test API needs no real credential, but the
-connection must exist):
-
-```sql
-CREATE CONNECTION IF NOT EXISTS yaif_demo_api TYPE HTTP
-OPTIONS (host 'https://jsonplaceholder.typicode.com', port '443',
-         base_path '/', bearer_token 'unused');
-```
-
-Then:
-
-```bash
-databricks bundle validate
-databricks bundle deploy
-databricks bundle run content_fetch_and_pipeline   # posts, comments, albums, photos
-databricks bundle run people_fetch_and_pipeline    # users, todos
-```
-
-This ingests 6 endpoints across two demo domains, each with its own isolated
-medallion. Use it to confirm the plumbing works before pointing at real APIs.
-
-## Playbook A — REST / HTTP APIs (one source, or hundreds)
-
-The only module with real code: a thread-pooled fetch through a governed UC HTTP
-connection lands raw JSON in a Delta table, and an SDP medallion parses it. Steps
-1–5 onboard a domain; **"Scale to hundreds/thousands"** at the end is the path to
-900+ endpoints.
-
-**1. Create a UC HTTP connection per API host / business domain.**
-The credential lives here — encrypted in UC, granted per principal, audited:
-
-```sql
--- Bearer token:
-CREATE CONNECTION company_api TYPE HTTP
-OPTIONS (
-  host 'https://api.yourcompany.com',
-  port '443',
-  base_path '/v1',
-  bearer_token '<your-token>'
-);
-
--- Or OAuth M2M for APIs with rotating credentials:
--- OPTIONS (host ..., port ..., base_path ...,
---          client_id '...', client_secret '...',
---          oauth_scope '...', token_endpoint 'https://.../oauth/token');
-
-GRANT USE CONNECTION ON CONNECTION company_api TO `data-engineers`;
-```
-
-**2. Point the bundle at your workspace, catalog, and connection** — edit `databricks.yml`:
-
-```yaml
-variables:
-  catalog:
-    default: "your_catalog"          # must exist; schemas are created by the bundle
-  api_connection:
-    default: "company_api"           # the connection from step 1
-targets:
-  dev:
-    workspace:
-      profile: your-cli-profile      # or host: https://your-workspace...
-```
-
-**3. Carve your endpoints into domain units.** Don't run everything in one job
-(blast radius, mixed SLAs, one team's bad API blocks everyone) and don't create
-one job per endpoint (operational sprawl). The unit is the **business domain**:
-
-```
-N endpoints ÷ business domain (finance, sales, logistics, ...) ≈ 10–30 units
-each unit = resources/api/<domain>.yml = schema + pipeline + job, sharing src/
-```
-
-To onboard a domain: copy `resources/api/content_domain.yml`, rename the resource
-keys and schema, set its endpoint list, deploy. ~60 lines of YAML, zero code.
-Split a domain further only when freshness SLAs differ (e.g. `finance_hourly` vs
-`finance_daily` — a job has one schedule).
-
-Why this shape:
-- **Failure isolation** — a broken API in one domain never blocks the others
-- **Independent schedules** — each domain job gets its own cron + concurrency
-- **Per-team governance** — grants on the domain schema and connection; each
-  medallion (bronze/silver/gold) lives in its domain schema. Pipeline/job `CAN_VIEW`
-  grants are driven by the `viewers_group` variable (default `users` for the demo);
-  override it globally, per target, or per-domain (set a domain's own team group in
-  its `resources/*/*.yml`) to realize true per-team visibility
-- **Rate-limit budgeting** — the sum of `request_concurrency` across jobs that
-  overlap in schedule must stay under the gateway limit; stagger crons
-
-Start each domain with 10–20 endpoints, watch its `gold_api_endpoint_health`,
-then ramp `request_concurrency` to what the gateway tolerates. To go past a
-handful of domains, see **Scale to hundreds/thousands of endpoints** below.
-
-**4. Deploy, run, schedule:**
-
-```bash
-databricks bundle deploy -t dev
-databricks bundle run content_fetch_and_pipeline -t dev   # one command per domain
-
-# When ready, schedule each domain — add to its resources/api/<domain>.yml job:
-#   schedule:
-#     quartz_cron_expression: "0 0 */4 * * ?"   # every 4 hours
-#     timezone_id: "America/Santiago"
-# Stagger crons across domains sharing a gateway.
-```
-
-**5. Promote to prod:** `databricks bundle deploy -t prod` — `mode: production` marks
-every pipeline `development: false` (full retries) and validates it, with isolated schemas.
-
-### Scale to hundreds/thousands of endpoints (worked example: 900 APIs)
-
-Two levers keep "900 APIs" from ever meaning 900 files or 900 redeploys — and both
-are **real files in this repo**, not pseudo-code:
-
-**Lever 1 — one control table is the source of truth.** Every endpoint is one row,
-tagged with the business domain it belongs to. Two interchangeable forms, kept in
-sync (columns: `domain, endpoint_name, path, method, params, schedule, enabled`):
-
-| Form | File | Use for |
-|---|---|---|
-| CSV | [`examples/api/control_table.csv`](examples/api/control_table.csv) | quick start / local — no workspace needed |
-| SQL | [`examples/api/control_table.sql`](examples/api/control_table.sql) | the governed Unity Catalog table (`<catalog>.config.api_endpoints`) |
-
-Adding, pausing, or removing an endpoint is an edit to this one table — never a code change.
-
-**Lever 2 — generate one domain YAML per domain from that table.** The script
-[`scripts/generate_api_domains.py`](scripts/generate_api_domains.py) reads the control
-table, groups enabled endpoints by domain, and emits one `resources/api/<domain>.yml`
-per domain — each byte-for-byte the same shape as the canonical `content_domain.yml`.
-No hand-copying, no framework code.
-
-```bash
-# From the CSV (no workspace needed):
-python scripts/generate_api_domains.py --csv examples/api/control_table.csv
-
-# ...or from the Unity Catalog control table:
-python scripts/generate_api_domains.py \
-  --table main.config.api_endpoints --warehouse-id <warehouse-id> [--profile <name>]
-```
-
-Output (run this, get that):
-
-```
-Reading control table from CSV: examples/api/control_table.csv
-  wrote build/generated_api/accounts.yml  (1 endpoints)
-  wrote build/generated_api/blog.yml  (2 endpoints)
-  wrote build/generated_api/gallery.yml  (2 endpoints)
-
-Done: read 5 enabled endpoints across 3 domains -> wrote 3 YAML files to build/generated_api/
-  (1 disabled row(s) skipped)
-```
-
-The generator writes to a **preview** dir (`build/generated_api/`) — it never clobbers
-`resources/`. See exactly what one emitted file looks like at
-[`examples/api/generated_sample/blog.yml`](examples/api/generated_sample/blog.yml)
-(note the disabled `todos` row is dropped and the `postId=1` params row becomes
-`/comments?postId=1`). Review the YAML, move the domains you want into `resources/api/`,
-then deploy. (See [`scripts/README.md`](scripts/README.md) for the full round-trip.)
-
-> **Optional — skip regenerating when you only change endpoints.** Instead of baking
-> `api_endpoints` into each YAML, you can have the fetch job read its domain's slice
-> from the control table at runtime (pass a `domain` parameter and
-> `spark.read.table("<catalog>.config.api_endpoints").filter("enabled AND domain = …")`).
-> Then adding an endpoint is a pure `INSERT`, no redeploy. The generator path above is
-> the simpler default; this is the trade-up when endpoint churn is high.
-
-**The 900-endpoint run, end to end:**
-
-1. Load all 900 endpoints into the control table, each tagged with its domain
-   (≈45 domains × ≈20 endpoints — group by team / freshness SLA: `finance`, `sales`, …).
-2. Run `python scripts/generate_api_domains.py --table <catalog>.config.api_endpoints
-   --warehouse-id <id>` → ~45 YAML files in `build/generated_api/`.
-3. Move them into `resources/api/`, then `databricks bundle deploy -t dev` → ~45 isolated
-   pipelines + jobs. No `databricks.yml` edits: the target `mode` (`development`/`production`)
-   sets each pipeline's `development` flag automatically — onboarding is a pure file copy.
-4. Stagger each job's schedule and ramp `request_concurrency` per
-   `gold_api_endpoint_health`; promote with `-t prod`.
-
-Framework code written: **zero**. Adding endpoints later = edit the control table +
-re-run the generator (or just `INSERT` if you adopt the runtime-read option above).
-
-## Playbook A2 — POST / body / Basic-auth / semi-structured (VARIANT) APIs
-
-Playbook A handles GET endpoints through a UC HTTP connection. Some APIs need more:
-a **POST** with a JSON **body**, **HTTP Basic auth**, and a response that is arbitrary
-**nested JSON** (no flat array of records). Oracle EPM's `exportdataslice` is the
-motivating case. The same shared `src/` code handles all of it — you change config, not
-code. The data-safe, deployable demo of this whole path is
-[`resources/api/echo_post_demo.yml`](resources/api/echo_post_demo.yml) (postman-echo,
-mock creds — no customer data).
-
-**1. Per-endpoint request specs.** Instead of the `api_endpoints` CSV (GET paths), a
-domain can pass `api_endpoints_json` — a JSON array of specs, each
-`{"path", "method", "body"(obj), "headers"(map), "name"}` (all but `path` optional). It
-**overrides** `api_endpoints` when present; a bare `api_endpoints` CSV still means GET,
-no body (fully backward compatible). The generator emits the CSV when every row is
-GET-with-no-body and `api_endpoints_json` otherwise — so existing GET domains are
-byte-for-byte unchanged.
-
-**2. Auth mode.** A new `auth_mode` base_parameter picks the transport:
-
-| `auth_mode` | Transport | Use for |
-|---|---|---|
-| `connection` (default) | `serving_endpoints.http_request(conn=…)` — UC HTTP connection, now method/body aware | Bearer / OAuth M2M APIs (the content/people demos). Keeps UC governance. |
-| `basic_secret` | Direct Python `requests` with `Authorization: Basic base64(user:pass)` from `dbutils.secrets` | HTTP Basic-auth APIs (Oracle EPM). |
-
-> **Why Basic auth can't ride the UC connection.** A UC HTTP connection force-prefixes
-> `Bearer ` to its credential and merges connection-auth into the `Authorization` header,
-> and you cannot create a host-only (no-auth) connection — so a clean `Authorization:
-> Basic …` is impossible through `http_request` (runtime-verified). `basic_secret` mode
-> bypasses the proxy. (Strategic alternative: if the API supports OAuth2 M2M — e.g.
-> Oracle via OCI IAM/IDCS — use `auth_mode: connection` with OAuth on the connection to
-> restore UC-connection governance.) `basic_secret` needs `api_base_url` (scheme+host),
-> `secret_scope`, `secret_key_username`, and `secret_key_password`; the password ALWAYS
-> comes from a secret, never inline.
-
-**3. VARIANT landing for nested JSON (`silver_shape`).** Bronze now derives a
-`response_variant VARIANT` column with `try_parse_json` (NULL on bad JSON — never fails
-the streaming batch), alongside the raw `response_body` STRING (loss-proof audit). The
-silver layer forks on a per-pipeline `silver_shape` configuration:
-
-| `silver_shape` | Silver table | Shape |
-|---|---|---|
-| `records` (default) | `silver_api_records` | one row per record, exploded from an array, keyed `(endpoint, record_id)` |
-| `document` | `silver_api_documents` | one VARIANT row per response, keyed `(endpoint, run_id)` — no per-record id needed |
-
-Both `src/transformations/silver_api_records.py` and `silver_api_documents.py` are
-globbed by every API pipeline, but each guards on `silver_shape` and no-ops when not
-selected, so only the chosen table is created. `gold_api_records_per_day` follows the
-shape automatically; `gold_api_endpoint_health` reads bronze, so it is shape-agnostic.
-
-Navigate a `document`-shape grid off the VARIANT with the `:` path operator and
-`variant_explode`:
-
-```sql
-SELECT d.endpoint, d.run_id,
-       d.response_variant:gridDefinition.suppressMissingBlocks::boolean AS suppress,
-       r.value:members AS row_members
-FROM   yaif_echo.silver_api_documents d,
-LATERAL variant_explode(d.response_variant:gridDefinition.rows) AS r;
-```
-
-**4. Try the demo (data-safe).** Create the mock secret scope, deploy, run:
+Want a data-safe **POST + body + Basic-auth + VARIANT** proof (the exact shape Oracle EPM
+uses, against a public mock)? Run the postman-echo demo:
 
 ```bash
 databricks secrets create-scope yaif_api
 databricks secrets put-secret yaif_api mock_username --string-value postman
 databricks secrets put-secret yaif_api mock_password --string-value password
-databricks bundle deploy -t dev
-databricks bundle run echo_post_demo_fetch_and_pipeline -t dev
+databricks bundle run echo_post_demo_fetch_and_pipeline -t dev   # POSTs to postman-echo.com
 ```
 
-It POSTs an EPM-shaped `gridDefinition` to `postman-echo.com/post`, lands the echoed
-nested JSON as a VARIANT, and builds `silver_api_documents` + gold — proving POST + body
-+ Basic + VARIANT end-to-end with zero customer data.
+### B — Activate a real source: Oracle EPM, step by step
 
-### Activate the Oracle EPM domain (CUSTOMER-RUN-ONLY)
+> **Oracle EPM is CUSTOMER-RUN-ONLY.** This is how a **customer** activates EPM in **their
+> own** workspace, against **their** EPM, with **their** credentials. The repo ships only
+> placeholders (`var.epm_host` → `REPLACE-ME.example.com`; a customer-managed secret scope)
+> and **never** calls `exportdataslice` from the SA sandbox — that returns live planning
+> data. For a runnable sandbox proof of the same POST/Basic/VARIANT path, use the
+> postman-echo demo in **A** above.
 
-[`examples/api/epm_domain.yml`](examples/api/epm_domain.yml) is the real
-`exportdataslice` template. It is **out of the deploy glob and never run from this repo**
-— `exportdataslice` returns planning data and must never be called from the SA sandbox.
-The capability is proven by the echo demo above; this file is the **customer's** to run
-in **their** workspace. No real EPM host or credentials live in the repo (`api_base_url`
-is `${var.epm_host}`, defaulting to a placeholder; creds come from a customer-managed
-secret scope). Activate it in the customer workspace:
+Done entirely from the Databricks workspace. Full walkthrough: [docs/oracle-epm.md](docs/oracle-epm.md).
 
-1. Create the secret scope with the customer's EPM creds (`epm_username`/`epm_password`).
-2. Set `epm_host` + `epm_secret_scope` vars; edit the `gridDefinition` body + path.
-3. Move `examples/api/epm_domain.yml` → `resources/api/epm_domain.yml`.
-4. `databricks bundle deploy && databricks bundle run epm_customer_fetch_and_pipeline`.
+1. **Import the repo into your workspace.** Sidebar → **Workspace → Repos → Add Repo**,
+   paste the Git URL, **Create Repo**. (Or clone locally and drive it with the CLI — either
+   way you have the `yaif` bundle.)
 
-Full steps are in the file header.
-
-## Playbook B — SQL Server (CDC or query-based via Lakeflow Connect)
-
-A managed connector — YAIF supplies only conventions, no custom code. Two sibling
-templates, both kept **outside** the deploy glob because they need a live connection:
-
-| Template | Pattern | Use when |
-|---|---|---|
-| `examples/sqlserver/orders_cdc.yml` | **CDC** — continuous gateway + triggered ingestion | The source can enable CDC / Change Tracking; you need every intermediate change and full delete capture |
-| `examples/sqlserver/orders_query.yml` | **Query-based** — scheduled, no gateway | The source **cannot** enable CDC/CT; each table has a monotonic cursor column |
-
-### CDC vs query-based: when to use which
-
-|   | **CDC (gateway)** | **Query-based** |
-|---|---|---|
-| Source prerequisite | CDC or Change Tracking enabled on the source | **None** — just a `SELECT`-able cursor column per table |
-| Infra | Continuous gateway (classic compute) + staging Volume | **No gateway, no staging Volume** — connector queries the source directly |
-| Cost / ops | Gateway runs and bills continuously until stopped | Cheaper/simpler: serverless, runs only on its schedule |
-| Change fidelity | Every intermediate change between runs | **Latest state at each scheduled run** only |
-| Deletes | Full delete capture from the change feed | Soft delete via `deletion_condition` (GA, API-only); **hard-delete capture is Beta** (API-only) |
-| Source load | Low (reads the change feed) | Higher — queries the source table each run |
-| Requirement | — | Each table needs **one monotonic *modified* cursor** that advances on every INSERT **and UPDATE** (a `ModifiedDate`/`last_updated` timestamp or `rowversion`); an identity/auto-increment PK is **insert-only**, so it misses UPDATEs. Without any monotonic cursor the connector full-reloads every run |
-
-Both land governed UC tables and use the same **SCD Type 1, keyed on the primary key**,
-current-state dedup the API/files silver layers use (query-based sequences by the cursor
-column; CDC by the change sequence). Pick query-based when the source owner won't (or
-can't) turn on CDC/CT; pick CDC when you need full change history or delete capture.
-
-> **⚠️ Query-based REQUIRES a monotonic *modified* cursor to capture updates.** The
-> cursor must advance on every INSERT **and UPDATE** — a `ModifiedDate`/`last_updated`
-> timestamp (or `rowversion`). An identity / auto-increment primary key only advances on
-> INSERT, so using it as the cursor yields an **insert-only feed that silently misses
-> every UPDATE** to existing rows. Keep the PK as `primary_keys` (for SCD dedup); choose
-> a modified-timestamp for `cursor_columns`. The bundled demo models this: the `DemoDB`
-> seeder (in the `demo-environments` repo) adds a `ModifiedDate DATETIME2` column —
-> DEFAULT `SYSUTCDATETIME()` on insert, bumped by an AFTER UPDATE trigger — and
-> `examples/sqlserver/orders_query.yml` uses it as the cursor.
-
-The CDC steps follow; for the query-based path skip to **"Query-based activation"** below.
-
-1. **Enable CDC or Change Tracking** on the source tables (your DBA).
-2. **Create the UC connection** (credentials live here, never in a file):
-   ```sql
-   CREATE CONNECTION sqlserver_conn TYPE SQLSERVER
-   OPTIONS (host '<host>', port '1433', user '<user>', password '<password>',
-            trustServerCertificate 'true');
-   GRANT USE CONNECTION ON CONNECTION sqlserver_conn TO `data-engineers`;
+2. **Store the EPM credentials as UC secrets** (never in a file). In a terminal with the
+   CLI authenticated to *your* workspace:
+   ```bash
+   databricks secrets create-scope epm_secrets
+   databricks secrets put-secret epm_secrets epm_username --string-value '<your-epm-user>'
+   databricks secrets put-secret epm_secrets epm_password --string-value '<your-epm-password>'
    ```
-   Use a **dedicated least-privilege login** for `<user>` — only the CT/CDC read grants the
-   connector needs, never `SA`/`db_owner` (that broad role is for a DBA enabling CDC, not
-   steady-state reads). `trustServerCertificate 'true'` disables server-cert validation, which
-   is fine for a lab; **for prod, validate TLS** — drop the option (or pin the CA) so the
-   gateway verifies the server certificate.
-3. **Set the variables** in `databricks.yml`: `sqlserver_connection` and
-   `sqlserver_source_database`. List your tables in the example's `objects:` block
-   (one `table:` block each, or a single `schema:` block for a whole schema).
-4. **Activate:** move `examples/sqlserver/orders_cdc.yml` → `resources/sqlserver/`
-   (no `databricks.yml` edits — the target `mode` sets each pipeline's `development` flag).
-5. **Deploy, start the gateway, run ingestion:** `databricks bundle deploy`, then start the
-   **continuous gateway** once — `databricks bundle run sqlserver_gateway` — which runs
-   continuously, capturing changes into staging. Trigger applies with
-   `databricks bundle run sqlserver_ingestion_job` (or schedule that job). The job triggers
-   **only** the ingestion pipeline — the gateway is continuous and is *not* a job task
-   ([SQL Server ingestion docs](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/sql-server-pipeline):
-   *"You must run the gateway as a continuous pipeline"*; the scheduled job targets only the
-   ingestion pipeline).
-6. **Verify** with any SQL warehouse:
-   `SELECT count(*) FROM <catalog>.yaif_sqlserver.<table>;`
 
-Onboard more tables: add `table:` blocks (or one `schema:` block) to `objects:` and
-redeploy — no new code.
+3. **Activate the example** — move it into the deploy glob:
+   ```bash
+   mv examples/api/epm_domain.yml resources/api/epm_domain.yml
+   ```
 
-**Cost & ops notes:**
-- **The gateway is continuous** — once started it runs (and bills classic-compute DBUs)
-  until stopped. Databricks recommends **not** stopping it in production: if it's down long
-  enough for the source's change log to truncate, you must full-refresh the affected tables.
-  For a demo you can stop it to halt cost (`databricks pipelines stop <gateway-id>`),
-  accepting that trade-off. The scheduled job triggers **only** the ingestion pipeline.
-- **Staging retention is 30 days** — the gateway → ingestion staging Volume keeps change
-  data ~30 days by default; reprocessing further back requires a resnapshot.
+4. **Set the variables** in `databricks.yml`, and edit the request in the moved file:
+   ```yaml
+   variables:
+     catalog:          { default: "your_catalog" }                 # must already exist
+     epm_host:         { default: "https://your-epm-host.example.com" }
+     epm_secret_scope: { default: "epm_secrets" }                  # the scope from step 2
+   targets:
+     dev:
+       workspace:
+         profile: your-cli-profile
+   ```
+   Then open `resources/api/epm_domain.yml` and edit the `path` + `gridDefinition` body to
+   the application / plan type / slice you want to export (the file header explains each field).
 
-**Table-count limit & sharding (verified against the docs).** Databricks recommends
-**≤ 250 tables per ingestion pipeline** ([SQL Server connector limitations](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/sql-server-limits)
-— "Databricks recommends ingesting 250 or fewer tables per pipeline"; the
-feature-availability table lists 250 as the maximum). A gateway and an ingestion
-pipeline form a **pair** — the ingestion pipeline references exactly one gateway via
-`ingestion_gateway_id` — so to go beyond ~250 tables you split the table list across
-**multiple gateway-ingestion pairs**, each pair under the limit and all publishing into
-the same `yaif_sqlserver` schema. The commented second pair in
-`examples/sqlserver/orders_cdc.yml` shows the split. (Note: the docs describe scaling
-via separate gateway-ingestion *pairs*, not one gateway feeding many ingestion
-pipelines.)
+5. **Deploy the bundle:**
+   ```bash
+   databricks bundle deploy -t dev
+   ```
 
-### Query-based activation (no CDC/CT on the source)
+6. **Run the ingestion job** (it fetches, then runs the pipeline):
+   ```bash
+   databricks bundle run epm_customer_fetch_and_pipeline -t dev
+   ```
 
-Template: `examples/sqlserver/orders_query.yml` (ingestion pipeline + scheduled job — **no
-gateway, no staging Volume**). Use it when the source can't enable CDC/Change Tracking.
+7. **Verify the rows landed** — in any SQL warehouse (in dev mode schemas are prefixed
+   `dev_<you>_…`):
+   ```sql
+   SELECT count(*) FROM your_catalog.yaif_epm.bronze_api_responses;     -- raw landed
+   SELECT * FROM your_catalog.yaif_epm.silver_api_documents LIMIT 20;   -- parsed VARIANT
+   ```
 
-1. **Create the UC connection** — same `SQLSERVER` connection as CDC (a least-privilege
-   login needs only `SELECT` on the tables you ingest; no CDC/CT setup on the source).
-2. **Pick a modified-timestamp cursor per table** — exactly one monotonically-increasing
-   column that advances on every INSERT **and UPDATE**: a `ModifiedDate`/`last_updated`
-   timestamp (or `rowversion`). **Do not use an identity/auto-increment PK as the cursor**
-   — it only advances on INSERT, so the feed becomes insert-only and silently misses every
-   UPDATE to an existing row. Set the cursor under each table's
-   `table_configuration.query_based_connector_config.cursor_columns`, and keep
-   `primary_keys` + `scd_type: SCD_TYPE_1` for current-state dedup keyed on the PK (the PK
-   is for dedup, not for the cursor). Without any monotonic cursor the connector
-   **full-reloads every run**. (The demo's `DemoDB` tables ship a `ModifiedDate DATETIME2`
-   column — DEFAULT on insert + AFTER UPDATE trigger — so `orders_query.yml` uses it.)
-3. **Set the variables** in `databricks.yml` (`sqlserver_connection`, `sqlserver_source_database`)
-   and replace the example table/cursor/key names.
-4. **Activate:** move `examples/sqlserver/orders_query.yml` → `resources/sqlserver/`
-   (no `databricks.yml` edits — the target `mode` sets the pipeline's `development` flag).
-5. **Deploy & schedule:** `databricks bundle deploy`, then `databricks bundle run
-   sqlserver_query_ingestion_job` (or let its schedule drive it). No gateway to start.
-6. **Verify:** `SELECT count(*) FROM <catalog>.yaif_sqlserver_query.<table>;`
+For Bearer/OAuth APIs (the simpler default path) and scaling to hundreds of endpoints, see
+[docs/api-ingestion.md](docs/api-ingestion.md).
 
-**Query-based trade-offs:** no CDC/CT and no continuous gateway → simpler, cheaper, fully
-serverless. But: (a) it **requires a monotonic cursor per table**; (b) **deletes** are
-limited — soft deletes via `deletion_condition` (GA, **API-only** — not settable in the
-bundle YAML), and **hard-delete capture is Beta** (`hard_deletion_sync_min_interval_in_seconds`,
-also API-only) — vs full delete capture in CDC; (c) it captures the **latest state at each
-scheduled run, not every intermediate change** between runs; and (d) it **queries the source
-directly on each run**, adding source load the CDC change-feed path avoids.
-
-## Playbook C — Files in cloud storage (Auto Loader)
-
-Use this when a connector drops files into object storage and you own the
-ingestion — e.g. **Arcosoft exporting SAP tables as `.parquet` into an
-S3/ADLS/GCS bucket**. Unlike the API module (which lands payloads straight into a
-Delta table), files genuinely arrive *as files in a bucket*, which is exactly what
-Auto Loader (`cloudFiles`) is built for: incremental, exactly-once file discovery
-with schema evolution. Inside SDP the schema location and checkpoint are managed
-for you — there is no checkpoint to configure.
-
-The shared medallion code is `src/files/` (bronze → silver → gold); a per-feed
-domain unit is `examples/files/erp_parquet.yml`. Data flow:
+## Project layout
 
 ```
-  Connector (Arcosoft/SAP) ──► s3://bucket/arcosoft/*.parquet
-                                        │  (UC external location + EXTERNAL volume)
-                                        ▼
-                              /Volumes/<cat>/yaif_erp/landing/
-                                        │  Auto Loader (cloudFiles, format=parquet)
-                                        ▼
-                              bronze_cloud_files (STREAM)   + source-file lineage
-                                        ▼
-                              silver_cloud_files (STREAM)   quality + optional dedup
-                                        ▼
-                              gold_files_ingestion_health (MV)  files/rows/bytes/freshness
-                              gold_files_rows_per_day     (MV)  daily volume trend
+yaif/
+├── databricks.yml          # bundle + shared vars + dev/prod targets
+├── resources/              # deploy glob (resources/*/*.yml) — what ships
+│   ├── api/                #   one file per API business domain (+ echo demo)
+│   └── files/              #   self-contained files demo
+├── examples/               # activate-by-moving templates (need external setup)
+│   ├── api/                #   control table, generated sample, Oracle EPM template
+│   ├── sqlserver/          #   CDC + query-based Lakeflow Connect templates
+│   └── files/              #   real bucket feed template
+├── scripts/                # control table → generate one domain YAML per domain
+└── src/                    # SHARED medallion + job code — never copied per source
 ```
 
-**To activate a feed:**
+## Choose your connector
 
-1. Register the bucket with Unity Catalog — a storage credential + external
-   location over the prefix the connector writes to (full SQL, incl. ADLS/GCS
-   variants, is in the header of `examples/files/erp_parquet.yml`).
-2. Set `files_source_uri` in `databricks.yml` to that path (and `file_format` if
-   not Parquet).
-3. Move `examples/files/erp_parquet.yml` → `resources/files/erp_parquet.yml`
-   (this is what brings it into the deploy glob) — no `databricks.yml` edits; the target
-   `mode` (`development`/`production`) sets the pipeline's `development` flag automatically.
-4. `databricks bundle deploy && databricks bundle run erp_ingestion_job`.
-5. **Verify** with any SQL warehouse:
-   `SELECT count(*), count(DISTINCT source_file) FROM <catalog>.yaif_erp.bronze_cloud_files;`
-   and read `gold_files_ingestion_health` for files / rows / bytes / freshness.
+| Your source is… | Go to |
+|---|---|
+| A REST / HTTP API — one, or hundreds | [docs/api-ingestion.md](docs/api-ingestion.md) |
+| Files a tool drops in a bucket (Parquet/CSV/JSON) | [docs/files.md](docs/files.md) |
+| A SQL Server database | [docs/sqlserver.md](docs/sqlserver.md) |
+| Oracle EPM (or any POST + Basic-auth API) | [docs/oracle-epm.md](docs/oracle-epm.md) |
 
-> **Try it now without a bucket:** `databricks bundle run files_demo_seed_and_pipeline`
-> runs this exact medallion against a MANAGED volume seeded with synthetic Parquet
-> (`resources/files/demo.yml`). Same Auto Loader → SDP code as a real feed — only the
-> volume type differs — so it's the fastest way to see the pattern work end to end.
+**New here?** Read the [Quickstart](docs/quickstart.md), then [Concepts](docs/concepts.md)
+(medallion, silver shapes, the activate-by-moving model, catalogs/targets/profiles).
+Hit a snag? [Troubleshooting](docs/troubleshooting.md).
 
-Onboard another feed the same way you onboard an API domain: copy the domain
-file, rename the schema/volume/pipeline/job keys, point `source_path` at the new
-volume — the `src/files/` transformations are shared, zero code change. Set
-`dedup_keys` in the pipeline `configuration` when a connector re-exports overlapping
-windows (full + incremental): silver then dedups to current state via **AUTO CDC SCD
-Type 1** (latest row per key, sequenced by `dedup_order_by` — defaults to the source
-file modification time), the same bounded mechanism the API module uses. Leave
-`dedup_keys` unset to keep every ingested row.
-
-## Bonus: ad-hoc SQL access through the same connection
-
-The connection powering the API pipeline is queryable by analysts directly:
-
-```sql
-SELECT http_request(conn => 'company_api', method => 'GET', path => '/orders').text;
-```
-
-One governed credential serves bulk pipeline ingestion, ad-hoc SQL exploration,
-and per-principal access control with audit — zero credential duplication. This
-is a Unity Catalog governance differentiator worth demoing in platform
-comparisons.
-
-> **Fallback — secret scopes:** if your workspace can't use HTTP connections yet
-> (older DBR, missing privilege), swap the `get_with_retry` block for a plain
-> `requests.Session` with `Authorization: Bearer {dbutils.secrets.get(scope, key)}` —
-> the landing table contract and the SDP pipeline are identical either way.
-
-> Agent/contributor notes — the dev/prod target conventions and the hard-won
-> gotchas baked into these templates now live in `CLAUDE.md` (see "Gotchas that
-> WILL bite you"). Read it before changing a pipeline, job, or path in this repo.
+> Contributing or working with an AI agent in this repo? `CLAUDE.md` is the agent-facing
+> playbook (conventions + the hard-won gotchas). Read it before changing a pipeline, job,
+> or path.
