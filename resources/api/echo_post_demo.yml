@@ -42,6 +42,10 @@ resources:
       schema: ${resources.schemas.echo_schema.name}
       serverless: true
       photon: true
+      # root_path puts src/ on sys.path at pipeline runtime, so the medallion files can
+      # `from shared.… import …` (the transform-pattern helpers). The glob below still
+      # decides which files are pipeline SOURCE — src/shared/ is deliberately outside it.
+      root_path: ../../src
       libraries:
         - glob:
             include: ../../src/transformations/**
@@ -57,6 +61,7 @@ resources:
           alerts:
             - on-update-failure
             - on-update-fatal-failure
+            - on-flow-failure
       permissions:
         - level: CAN_VIEW
           group_name: ${var.viewers_group}

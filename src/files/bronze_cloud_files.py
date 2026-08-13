@@ -17,7 +17,9 @@ Config (set in the pipeline `configuration` block of the domain resource):
 """
 
 from pyspark import pipelines as dp
-from pyspark.sql import functions as F
+
+from shared.file_lineage import with_source_file_lineage
+from shared.ingest_columns import with_ingest_stamps
 
 SOURCE_PATH = spark.conf.get("source_path")
 FILE_FORMAT = spark.conf.get("file_format", "parquet")
@@ -48,11 +50,6 @@ def bronze_cloud_files():
         .option("cloudFiles.schemaEvolutionMode", "addNewColumns")
         .option("cloudFiles.rescuedDataColumn", "_rescued_data")
         .load(SOURCE_PATH)
-        # File lineage from the hidden _metadata column — rename so it survives to the
-        # table (a source column literally named `_metadata` would otherwise shadow it).
-        .withColumn("source_file", F.col("_metadata.file_path"))
-        .withColumn("source_file_size", F.col("_metadata.file_size"))
-        .withColumn("source_file_modified_at", F.col("_metadata.file_modification_time"))
-        .withColumn("_ingested_at", F.current_timestamp())
-        .withColumn("ingest_date", F.to_date(F.current_timestamp()))
+        .transform(with_source_file_lineage)
+        .transform(with_ingest_stamps)
     )

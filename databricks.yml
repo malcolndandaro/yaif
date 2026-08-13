@@ -2,7 +2,14 @@ bundle:
   name: yaif
 
 include:
-  - resources/*/*.yml
+  # Deploy glob, one line per SHIPPING module. Deliberately NOT a blanket
+  # `resources/*/*.yml`: the sqlserver module's gateway is `continuous: true` and bills
+  # until stopped, so a stray copy under resources/sqlserver/ must never deploy just by
+  # existing. Activating that module is two steps — move the file AND add its line here
+  # (in the same commit that creates the UC SQLSERVER connection).
+  - resources/api/*.yml
+  - resources/files/*.yml
+  # - resources/sqlserver/*.yml   # uncomment only with a UC SQLSERVER connection in place
 
 variables:
   catalog:

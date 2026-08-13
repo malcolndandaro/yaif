@@ -39,14 +39,40 @@ was explicitly designed against.
 
 - **Shared code lives in `src/`, never copied per-feed.** `src/jobs/` (Python job
   tasks), `src/transformations/` (API SDP medallion source), `src/files/` (files SDP
-  medallion source). A new domain/feed reuses this code unchanged — if you find
-  yourself copying a `src/` file per domain, you're doing it wrong.
+  medallion source), `src/shared/` (pipeline-agnostic transform functions). A new
+  domain/feed reuses this code unchanged — if you find yourself copying a `src/` file
+  per domain, you're doing it wrong.
+- **The transform pattern is the DEFAULT idiom for medallion code.** Every non-trivial
+  DataFrame chain is built from named, single-purpose `DataFrame -> DataFrame` functions
+  in `src/shared/`, applied with `.transform(...)`:
+
+  ```python
+  return (spark.readStream.table("bronze_api_responses")
+          .transform(parse_json_records)
+          .transform(explode_records)
+          .transform(project_record_columns))
+  ```
+
+  Rules: one job per function, typed `(df: DataFrame) -> DataFrame`, a docstring saying
+  *why*, and **no** `spark`, `spark.conf`, or `dbutils` reference — that is what keeps
+  them unit-testable in `tests/` without a workspace. Parameterized transforms take
+  keyword args and are applied with a lambda (`.transform(lambda d: recent_ingest_days(d, days=30))`).
+  Do NOT apply the pattern to cohesive one-off configuration (the Auto Loader `.option()`
+  chain) or to `groupBy().agg()` blocks — wrapping those hurts readability. And do NOT
+  grow `src/shared/` into a framework: plain functions only, no registry, no dispatch,
+  no base classes.
+- **Anything in `src/shared/` needs a test in `tests/`.** See `tests/README.md` (needs a
+  dedicated venv — a global `databricks-connect` provides `pyspark` but refuses local
+  sessions).
 - **One deployable unit per feed = one domain YAML.** Each
   `resources/<module>/<feed>.yml` is a self-contained schema + pipeline + job.
   Onboarding a feed is a file copy + a few field edits, never a code change.
-- **`resources/*/*.yml` is the deploy glob** (note the module-subdir level — files sit
-  one dir deep under `resources/<module>/`). Anything matching it deploys on
-  `bundle deploy`.
+- **The deploy glob is one `include:` line per SHIPPING module** (`resources/api/*.yml`,
+  `resources/files/*.yml`) — deliberately NOT a blanket `resources/*/*.yml`. The
+  sqlserver gateway is `continuous: true` and bills until stopped, so a stray copy under
+  `resources/sqlserver/` must never deploy just by existing. Activating that module is
+  TWO steps: move the file AND uncomment its `include:` line. Files sit one dir deep
+  under `resources/<module>/`.
 - **Modules that need external setup live in `examples/`, OUTSIDE the glob, and are
   "activated by moving."** A feed that depends on infra that may not exist yet (a UC
   `SQLSERVER` connection, a UC external location) would fail `bundle validate`/`deploy`
@@ -75,7 +101,13 @@ yaif/
 │   ├── sqlserver/orders_cdc.yml      #   Lakeflow Connect CDC: continuous gateway + ingestion + job (needs a UC SQLSERVER connection + CDC/CT on source)
 │   ├── sqlserver/orders_query.yml    #   Lakeflow Connect QUERY-BASED: cursor-driven ingestion + scheduled job, NO gateway (use when source can't enable CDC/CT)
 │   └── files/erp_parquet.yml         #   real file feed: schema + EXTERNAL volume + pipeline + job (needs a UC external location)
+├── tests/                            # pytest over src/shared/** (local SparkSession, no workspace)
 └── src/                              # SHARED module source — never copy per-domain
+    ├── shared/                       # TRANSFORM-PATTERN helpers — OUTSIDE both pipeline globs (gotcha #10)
+    │   ├── ingest_columns.py         #   with_ingest_stamps, recent_ingest_days (used by BOTH modules)
+    │   ├── api_records.py            #   parse_json_records / explode_records / project_record_columns
+    │   ├── api_documents.py          #   with_response_variant, project_document_columns
+    │   └── file_lineage.py           #   with_source_file_lineage (_metadata -> real columns)
     ├── jobs/
     │   ├── fetch_api_responses.py    # API: threaded UC-connection fetch -> Delta landing table
     │   └── seed_demo_parquet.py      # files demo: writes synthetic Parquet into the demo volume (stands in for a connector)
@@ -224,6 +256,21 @@ yaif/
    pipeline `silver_shape` config and no-op when not selected. The data-safe demo of all
    of this is `resources/api/echo_post_demo.yml`; the real EPM template (out of glob,
    customer-run-only) is `examples/api/epm_domain.yml`. See README "Playbook A2".
+10. **`src/shared/` MUST stay outside `src/transformations/**` and `src/files/**`.** Those
+    two are the pipeline `libraries.glob` patterns — anything inside them is loaded as
+    pipeline SOURCE. The shared transforms define no datasets, so they belong outside;
+    a helper dropped into `src/transformations/` gets loaded as a (dataset-less) source
+    file and muddies the convention. This is the same rule as "keep the seeder in
+    `src/jobs/`, never `src/files/`" (see the layout tree).
+    What makes the import work is **`root_path: ../../src` on every pipeline** — Databricks
+    appends the pipeline root to `sys.path` when executing Python sources, so
+    `from shared.ingest_columns import with_ingest_stamps` resolves. If you add a new
+    pipeline resource, set `root_path` or every `shared.*` import fails at runtime.
+    (`root_path` is Public Preview; it is also what makes a pipeline editable in the
+    Lakeflow multi-file editor.)
+11. **`.transform()` needs no SDP plumbing** — it is plain PySpark `DataFrame` API and
+    works inside `@dp.table` / `@dp.temporary_view` today. Only *cross-directory imports*
+    need `root_path` (#10). Don't conflate the two: an in-file helper needs nothing.
 
 ## How to onboard a new API domain
 

@@ -24,7 +24,8 @@ Downstream consumers navigate the grid with the `:` path operator + `variant_exp
 """
 
 from pyspark import pipelines as dp
-from pyspark.sql import functions as F
+
+from shared.api_documents import project_document_columns
 
 SILVER_SHAPE = spark.conf.get("silver_shape", "records")
 
@@ -35,22 +36,10 @@ if SILVER_SHAPE == "document":
         """One row per response holding the parsed VARIANT (CDC source).
 
         For non-record-array / arbitrary nested JSON APIs (e.g. EPM grids with no
-        per-record id). Streaming view; the CDC flow reads it incrementally. Drops rows
-        whose body did not parse (response_variant IS NULL) so the document table only
-        holds navigable VARIANTs; the raw STRING is kept alongside for audit.
+        per-record id). Streaming view; the CDC flow reads it incrementally. The shared
+        `project_document_columns` transform drops rows whose body did not parse.
         """
-        bronze = spark.readStream.table("bronze_api_responses")
-        return bronze.select(
-            F.col("endpoint"),
-            F.col("url"),
-            F.col("status_code"),
-            F.col("fetched_at"),
-            F.col("_ingested_at"),
-            F.col("ingest_date"),
-            F.col("run_id"),
-            F.col("response_variant"),  # parsed VARIANT
-            F.col("response_body"),  # raw STRING kept for audit / replay
-        ).filter(F.col("response_variant").isNotNull())
+        return spark.readStream.table("bronze_api_responses").transform(project_document_columns)
 
     # Expectations evaluate against the rows being applied (which carry every column the
     # parsed view selected), so they may reference status_code / response_variant.

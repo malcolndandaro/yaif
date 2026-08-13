@@ -27,8 +27,8 @@ selected — so only the chosen shape materializes (no empty unused table). Defa
 """
 
 from pyspark import pipelines as dp
-from pyspark.sql import functions as F
-from pyspark.sql.types import ArrayType, MapType, StringType
+
+from shared.api_records import explode_records, parse_json_records, project_record_columns
 
 SILVER_SHAPE = spark.conf.get("silver_shape", "records")
 
@@ -38,43 +38,15 @@ if SILVER_SHAPE == "records":
     def silver_api_records_parsed():
         """Parse + explode bronze responses into one row per API record (CDC source).
 
-        Bodies are JSON — a single object or an array. Try array first; `from_json`
-        returns NULL when the cast doesn't fit, so the COALESCE picks the right shape
-        per row without inspecting endpoint-by-endpoint. Nested objects come through as
-        a single map; downstream consumers re-parse `record_json` with a per-endpoint
-        schema. This is a streaming view (the CDC flow reads it incrementally).
+        Three shared transforms, each separately documented and unit-tested in
+        `tests/test_api_records.py`. This is a streaming view (the CDC flow reads it
+        incrementally).
         """
-        bronze = spark.readStream.table("bronze_api_responses")
-
-        parsed = bronze.withColumn(
-            "_records_array",
-            F.from_json(F.col("response_body"), ArrayType(MapType(StringType(), StringType()))),
-        ).withColumn(
-            "_records_single",
-            F.from_json(F.col("response_body"), MapType(StringType(), StringType())),
-        )
-
         return (
-            parsed.withColumn(
-                "_records",
-                F.coalesce(
-                    F.col("_records_array"),
-                    F.array(F.col("_records_single")),
-                ),
-            )
-            .withColumn("record", F.explode_outer("_records"))
-            .filter(F.col("record").isNotNull())
-            .select(
-                F.col("endpoint"),
-                F.col("url"),
-                F.col("status_code"),
-                F.col("fetched_at"),
-                F.col("_ingested_at"),
-                F.col("ingest_date"),
-                F.col("run_id"),
-                F.to_json(F.col("record")).alias("record_json"),
-                F.col("record")["id"].alias("record_id"),
-            )
+            spark.readStream.table("bronze_api_responses")
+            .transform(parse_json_records)  # body STRING -> _records array
+            .transform(explode_records)  # _records -> one row per record
+            .transform(project_record_columns)  # -> silver CDC source columns
         )
 
     # Empty target for the AUTO CDC flow. Expectations evaluate against the rows being

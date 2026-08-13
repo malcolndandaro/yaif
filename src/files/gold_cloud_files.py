@@ -3,6 +3,8 @@
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 
+from shared.ingest_columns import recent_ingest_days
+
 
 @dp.materialized_view(
     name="gold_files_ingestion_health",
@@ -16,16 +18,13 @@ from pyspark.sql import functions as F
     table_properties={"quality": "gold"},
 )
 def gold_files_ingestion_health():
-    # current_date() is non-deterministic, so this MV fully recomputes each run rather
-    # than refreshing incrementally. Accepted: it is a tiny per-day monitoring table.
-    # If incremental refresh is ever needed, drop the window here and apply the rolling
-    # 7-day filter in the dashboard query instead.
-    bronze = spark.read.table("bronze_cloud_files").filter(
-        F.col("ingest_date") >= F.date_sub(F.current_date(), 7)
-    )
-
+    # recent_ingest_days uses current_date(), which is non-deterministic, so this MV fully
+    # recomputes each run rather than refreshing incrementally. Accepted: it is a tiny
+    # per-day monitoring table. See the transform's docstring for the alternative.
     return (
-        bronze.groupBy("ingest_date")
+        spark.read.table("bronze_cloud_files")
+        .transform(recent_ingest_days)
+        .groupBy("ingest_date")
         .agg(
             F.countDistinct("source_file").alias("files_ingested"),
             F.count("*").alias("rows_ingested"),
