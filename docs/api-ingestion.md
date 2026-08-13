@@ -131,8 +131,14 @@ If you have 900 APIs you do **not** create 900 jobs by hand. Two levers keep "90
 from ever meaning 900 files or 900 redeploys — both are **real files in this repo**:
 
 **Lever 1 — one control table is the source of truth.** Every endpoint is one row, tagged
-with the business domain it belongs to. Two interchangeable forms, kept in sync (columns:
-`domain, endpoint_name, path, method, params, schedule, enabled`):
+with the business domain it belongs to. Two interchangeable forms, kept in sync. The first
+seven columns are required; `body`, `auth_mode`, and `silver_shape` are optional trailing
+columns (a 7-column table still parses), and are what drive the POST / Basic-auth / VARIANT
+path below:
+
+```
+domain, endpoint_name, path, method, params, schedule, enabled, body, auth_mode, silver_shape
+```
 
 | Form | File | Use for |
 |---|---|---|
@@ -290,10 +296,51 @@ One governed credential serves bulk pipeline ingestion, ad-hoc SQL exploration, 
 per-principal access control with audit — zero credential duplication. A Unity Catalog
 governance differentiator worth demoing in platform comparisons.
 
+## Pagination — a known limitation, read this before onboarding
+
+**The fetch job issues exactly one request per endpoint spec and lands exactly one
+response. It does NOT follow pagination.** A paginated endpoint therefore ingests **only
+its first page**, with no error and no warning — `gold_api_endpoint_health` will show
+`success_rate = 1.0` because the single request genuinely succeeded. Silent truncation
+behind a green dashboard, so check each endpoint before trusting its counts.
+
+Two supported ways to handle it:
+
+1. **Enumerate pages as explicit specs** (no code change). The control table's `params`
+   column already does this — one row per page:
+
+   ```csv
+   sales,orders_p1,/orders,GET,page=1&per_page=100,0 0 * * * ?,true
+   sales,orders_p2,/orders,GET,page=2&per_page=100,0 0 * * * ?,true
+   ```
+
+   Fine for a bounded, known page count. They fan out in parallel like any other endpoint.
+
+2. **Cursor / `next`-link pagination needs a loop in the fetch job** — a `while` around
+   `request_with_retry` that follows the server's next-page token until exhausted, landing
+   each page as its own row (keep the same `run_id` so they group). This is a genuine code
+   change to `src/jobs/fetch_api_responses.py` and the one case where a domain cannot be
+   onboarded by config alone.
+
+Either way, the medallion downstream is unchanged: each page is one bronze row, and the
+`records` silver shape explodes them all into the same table.
+
+## Rate limits (HTTP 429)
+
+`429 Too Many Requests` **is retried** — with jittered exponential backoff, up to 4
+attempts, alongside 5xx. Jitter matters at fan-out: without it, every thread that trips the
+same limit backs off in lockstep and re-trips it together.
+
+Retries are per-request, so they don't remove the need to budget concurrency: keep the sum
+of `request_concurrency` across jobs that overlap in schedule under the gateway's limit,
+and stagger crons. Watch `error_count` in `gold_api_endpoint_health` — a domain that is
+persistently 429-ing has exhausted its retries and needs lower concurrency or a wider
+schedule gap.
+
 ## Caveats / advanced
 
 > **Fallback — secret scopes.** If your workspace can't use HTTP connections yet (older
-> DBR, missing privilege), swap the `get_with_retry` block for a plain `requests.Session`
+> DBR, missing privilege), swap the `request_with_retry` block for a plain `requests.Session`
 > with `Authorization: Bearer {dbutils.secrets.get(scope, key)}` — the landing table
 > contract and the SDP pipeline are identical either way.
 

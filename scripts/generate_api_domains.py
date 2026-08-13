@@ -55,6 +55,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 # Columns expected in the control table, in order. The first 7 are required; `body`,
 # `auth_mode`, and `silver_shape` are optional trailing columns (read via dict.get with
@@ -89,6 +90,10 @@ resources:
       schema: ${resources.schemas.__DOMAIN___schema.name}
       serverless: true
       photon: true
+      # root_path puts src/ on sys.path at pipeline runtime, so the medallion files can
+      # `from shared.… import …` (the transform-pattern helpers). The glob below still
+      # decides which files are pipeline SOURCE — src/shared/ is deliberately outside it.
+      root_path: ../../src
       libraries:
         - glob:
             include: ../../src/transformations/**
@@ -101,6 +106,7 @@ __SILVER_SHAPE_CONFIG__      continuous: false
           alerts:
             - on-update-failure
             - on-update-fatal-failure
+            - on-flow-failure
       permissions:
         - level: CAN_VIEW
           group_name: ${var.viewers_group}
@@ -145,6 +151,26 @@ __SCHEDULE_BLOCK__      queue:
         - level: CAN_VIEW
           group_name: ${var.viewers_group}
 '''
+
+
+def _encode_params(params: str) -> str:
+    """Percent-encode a control-table `params` cell, preserving `k=v&k=v` structure.
+
+    The cell is authored as a raw query string (`postId=1&q=hello world`). Values may
+    contain spaces or other characters that are invalid in a URL, so each key and value is
+    encoded individually — encoding the whole string would destroy the `&`/`=` separators.
+
+    Already-encoded input is left alone (`safe="%"`), so a cell written as `q=hello%20world`
+    does not become `hello%2520world`.
+    """
+    parts = []
+    for pair in params.split("&"):
+        if not pair:
+            continue
+        key, sep, value = pair.partition("=")
+        key = quote(key.strip(), safe="%")
+        parts.append(f"{key}{sep}{quote(value.strip(), safe='%')}" if sep else key)
+    return "&".join(parts)
 
 
 def _truthy(value) -> bool:
@@ -230,7 +256,7 @@ def build_domains(rows: list[dict]) -> tuple[dict, dict]:
 
         method = (row.get("method") or "GET").strip().upper() or "GET"
         params = (row.get("params") or "").strip()
-        full_path = f"{path}?{params}" if params else path
+        full_path = f"{path}?{_encode_params(params)}" if params else path
         body_raw = (row.get("body") or "").strip()
 
         spec: dict = {"path": full_path, "method": method}
@@ -284,8 +310,10 @@ def _endpoints_block(endpoints: list[dict]) -> str:
         ep.get("method", "GET").upper() == "GET" and "body" not in ep for ep in endpoints
     )
     if all_get_no_body:
-        csv = ",".join(ep["path"] for ep in endpoints)
-        return f'              api_endpoints: "{csv}"\n'
+        # Not named `csv` — that would shadow the module-level `import csv` inside this
+        # function, which is a trap in a file whose whole job is reading CSV.
+        endpoints_csv = ",".join(ep["path"] for ep in endpoints)
+        return f'              api_endpoints: "{endpoints_csv}"\n'
     # Pretty-print the JSON array as a YAML block scalar (|), indented under the key.
     pretty = json.dumps(endpoints, indent=2)
     indented = "\n".join("                " + line for line in pretty.splitlines())

@@ -1,0 +1,11 @@
+# Local development / unit-test dependencies ONLY.
+# Not used by any deployed resource: serverless jobs declare their deps in the job
+# `environments:` block, and SDP pipelines get theirs from the pipeline environment.
+#
+# Install into a DEDICATED venv (see tests/README.md): a global databricks-connect
+# install also provides the `pyspark` module but refuses local SparkSessions, so the
+# two cannot share an environment.
+#
+# Pinned to the OSS Spark line matching serverless DBR's Spark 4.x.
+pyspark==4.0.0
+pytest>=8.0.0

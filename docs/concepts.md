@@ -58,9 +58,51 @@ own schema:
 - **bronze** — streaming ingest of the raw payload, append-only, audit-safe. (API: the raw
   response body as STRING plus a `response_variant VARIANT`; files: the raw rows plus
   source-file lineage.)
-- **silver** — parsed / cleaned / quality-checked current state, deduplicated to one row
-  per key (see AUTO CDC below).
+- **silver** — parsed / cleaned / quality-checked. Usually deduplicated to one row per key
+  (see AUTO CDC below); the one exception is the API `document` shape, which is keyed
+  `(endpoint, run_id)` and therefore accumulates snapshot history by design.
 - **gold** — materialized views for monitoring: success/ingestion health and daily volume.
+
+## The transform pattern
+
+Every non-trivial DataFrame chain in the medallion is built from named, single-purpose
+`DataFrame -> DataFrame` functions in `src/shared/`, applied with PySpark's
+[`DataFrame.transform()`](https://community.databricks.com/t5/technical-blog/how-to-use-the-transform-pattern-in-pyspark-for-modular-and/ba-p/117522):
+
+```python
+@dp.temporary_view()
+def silver_api_records_parsed():
+    return (
+        spark.readStream.table("bronze_api_responses")
+        .transform(parse_json_records)      # body STRING -> _records array
+        .transform(explode_records)         # _records -> one row per record
+        .transform(project_record_columns)  # -> silver CDC source columns
+    )
+```
+
+Why it's the default here:
+
+- **The chain reads as its own documentation.** The step names replace a paragraph of
+  prose explaining what one 30-line expression does.
+- **Genuinely shared conventions have exactly one definition.** `with_ingest_stamps` is
+  used by *both* the API and files bronze layers — the framework's `ingest_date`
+  convention can't drift between modules.
+- **It makes the logic unit-testable.** This is the real payoff. The functions touch no
+  `spark.conf`, `dbutils`, or SDP decorator, so they run under a plain local
+  SparkSession — `tests/` covers them with no workspace and no deploy. The SDP files
+  themselves can't be tested that way: they read `spark.conf` and register datasets at
+  import time.
+
+Two things to know:
+
+- `.transform()` is **plain PySpark** and needs no SDP setup. What needs setup is
+  importing across directories: every pipeline sets `root_path: ../../src`, which
+  Databricks appends to `sys.path` at runtime. `src/shared/` deliberately sits *outside*
+  `src/transformations/**` and `src/files/**` so the pipeline globs never load it as
+  pipeline source.
+- **Not everything should be a transform.** Cohesive one-off configuration (the Auto
+  Loader `.option()` chain) and `groupBy().agg()` blocks read better inline. `src/shared/`
+  is a set of small functions, not a framework — no registry, no dispatch, no base classes.
 
 ## Silver shapes (API module)
 
@@ -69,8 +111,8 @@ APIs return a flat array of records and others return one arbitrary nested docum
 
 | `silver_shape` | Silver table | Shape |
 |---|---|---|
-| `records` (default) | `silver_api_records` | one row per record, exploded from an array, keyed `(endpoint, record_id)` |
-| `document` | `silver_api_documents` | one VARIANT row per response, keyed `(endpoint, run_id)` — no per-record id needed |
+| `records` (default) | `silver_api_records` | one row per record, exploded from an array, keyed `(endpoint, record_id)`. Converges to **current state** — a re-fetch upserts in place. |
+| `document` | `silver_api_documents` | one VARIANT row per response, keyed `(endpoint, run_id)` — no per-record id needed. `run_id` is unique per fetch, so rows **accumulate as snapshot history**. |
 
 Both `silver_api_records.py` and `silver_api_documents.py` are globbed by every API
 pipeline, but each guards on `silver_shape` and no-ops when not selected, so only the
@@ -140,7 +182,13 @@ yaif/
 ├── scripts/
 │   ├── generate_api_domains.py       #   control table → one resources/api/<domain>.yml per domain
 │   └── README.md                     #   the control-table → generate → deploy round-trip
+├── tests/                            # pytest over src/shared/** — local SparkSession, no workspace
 └── src/                              # SHARED module source — never copied per-domain
+    ├── shared/                       #   TRANSFORM-PATTERN helpers, applied with .transform()
+    │   ├── ingest_columns.py         #     with_ingest_stamps, recent_ingest_days (both modules)
+    │   ├── api_records.py            #     parse / explode / project the records shape
+    │   ├── api_documents.py          #     VARIANT parse + document-shape projection
+    │   └── file_lineage.py           #     _metadata -> source_file* columns
     ├── jobs/
     │   ├── fetch_api_responses.py    #   API: threaded UC-connection fetch → Delta landing table (method/body/auth_mode aware)
     │   └── seed_demo_parquet.py      #   files demo: writes synthetic Parquet into the demo volume

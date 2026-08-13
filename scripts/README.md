@@ -20,7 +20,16 @@ One row per endpoint. Two interchangeable forms, kept in sync:
 | CSV | [`examples/api/control_table.csv`](../examples/api/control_table.csv) | quick start / local — no workspace needed |
 | SQL | [`examples/api/control_table.sql`](../examples/api/control_table.sql) | the governed Unity Catalog table the pipelines read at runtime |
 
-Columns: `domain, endpoint_name, path, method, params, schedule, enabled`.
+Columns — the first seven are required, the last three optional (a 7-column table still
+parses) and default to `GET` / `connection` / `records`:
+
+```
+domain, endpoint_name, path, method, params, schedule, enabled, body, auth_mode, silver_shape
+```
+
+`params` is authored as a raw query string (`postId=1&q=hello world`); the generator
+percent-encodes each key and value, so spaces and other unsafe characters are handled.
+Already-encoded values are left as-is.
 
 ### Run this
 

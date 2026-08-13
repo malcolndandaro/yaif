@@ -6,7 +6,9 @@ per pipeline update — and applies minimal enrichment (ingest timestamp, date).
 """
 
 from pyspark import pipelines as dp
-from pyspark.sql import functions as F
+
+from shared.api_documents import with_response_variant
+from shared.ingest_columns import with_ingest_stamps
 
 LANDING_TABLE = spark.conf.get("landing_table")
 
@@ -28,14 +30,8 @@ LANDING_TABLE = spark.conf.get("landing_table")
 @dp.expect("nonempty_success_body", "response_body IS NULL OR length(response_body) > 0")
 def bronze_api_responses():
     return (
-        spark.readStream.option("skipChangeCommits", "true").table(LANDING_TABLE)
-        .withColumn("_ingested_at", F.current_timestamp())
-        .withColumn("ingest_date", F.to_date(F.col("_ingested_at")))
-        # Parsed VARIANT alongside the raw STRING (response_body stays the loss-proof
-        # audit copy). try_parse_json -> NULL on bad JSON; parse_json would raise
-        # MALFORMED_RECORD_IN_PARSING and fail the whole streaming microbatch. The
-        # document-shape silver gates on response_variant IS NOT NULL. VARIANT needs
-        # DBR 15.3+ (serverless SDP satisfies). Not added to cluster_by — VARIANT
-        # cannot be a clustering / partition / Z-order key.
-        .withColumn("response_variant", F.expr("try_parse_json(response_body)"))
+        spark.readStream.option("skipChangeCommits", "true")
+        .table(LANDING_TABLE)
+        .transform(with_ingest_stamps)
+        .transform(with_response_variant)
     )

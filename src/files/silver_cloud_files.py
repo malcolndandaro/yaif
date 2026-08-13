@@ -26,7 +26,6 @@ Config (set in the pipeline `configuration` block of the domain resource):
 """
 
 from pyspark import pipelines as dp
-from pyspark.sql import functions as F
 
 DEDUP_KEYS = [c.strip() for c in spark.conf.get("dedup_keys", "").split(",") if c.strip()]
 DEDUP_ORDER_BY = spark.conf.get("dedup_order_by", "source_file_modified_at")

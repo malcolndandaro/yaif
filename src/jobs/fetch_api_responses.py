@@ -104,7 +104,7 @@ import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import DatabricksError
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
 # Method resolver for connection mode. The enum location varies across SDK versions
 # (serverless preinstalls its own SDK, which can shadow the environment dependency),
@@ -154,12 +154,26 @@ class TransientHttpError(Exception):
     """HTTP 5xx from the target API — retryable."""
 
 
+class RateLimitedError(Exception):
+    """HTTP 429 from the target API — retryable.
+
+    429 is < 500, so without this it would be treated as a permanent failure and the
+    endpoint silently skipped for the whole run (recorded as an error with no hint that a
+    retry would have worked). At the framework's headline scale — dozens of domain jobs
+    each fanning out `request_concurrency` requests — 429 is the *expected* non-2xx, so
+    it must retry.
+    """
+
+
 @retry(
     retry=retry_if_exception_type(
-        (TransientHttpError, DatabricksError, requests.exceptions.RequestException)
+        (RateLimitedError, TransientHttpError, DatabricksError, requests.exceptions.RequestException)
     ),
     stop=stop_after_attempt(4),
-    wait=wait_exponential(multiplier=1, min=1, max=10),
+    # RANDOM exponential (jittered), not plain wait_exponential: N threads that trip the
+    # same rate limit at the same instant would otherwise back off in lockstep (all sleep
+    # 1s, then 2s, then 4s) and re-trip it together. Jitter decorrelates the retry wave.
+    wait=wait_random_exponential(multiplier=1, max=10),
     reraise=True,
 )
 def request_with_retry(spec: dict) -> tuple:
@@ -198,6 +212,10 @@ def request_with_retry(spec: dict) -> tuple:
         )
         status, text = resp.status_code, resp.text
 
+    # Retry rate limiting and server errors; every other non-2xx is a permanent failure
+    # that fetch_one records against the endpoint.
+    if status == 429:
+        raise RateLimitedError(f"HTTP 429 (rate limited) on {path}")
     if status >= 500:
         raise TransientHttpError(f"HTTP {status} on {path}")
     return status, text
