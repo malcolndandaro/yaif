@@ -37,6 +37,11 @@ Expected: `21 passed`.
 
 - `conftest.py` puts `src/` on `sys.path`, mirroring what `root_path: ../../src` does at
   pipeline runtime — so the tests import `shared.…` exactly as the pipeline files do.
+- `conftest.py` also pins `PYSPARK_PYTHON` / `PYSPARK_DRIVER_PYTHON` to `sys.executable`.
+  Spark otherwise launches workers with a bare `python3` from PATH, and if that is a
+  different minor version than the venv (a system upgrade putting 3.14 ahead of the venv's
+  3.12 is enough) every test that materializes rows fails with `PYTHON_VERSION_MISMATCH`.
+  Run the suite via `.venv-test/bin/python -m pytest`, not a bare `pytest`.
 - VARIANT assertions use `variant_get(v, '$.path', 'type')`, not the Databricks shorthand
   `v:path::type`. The `:` operator is a Databricks SQL extension and does not parse in OSS
   Spark; both resolve the same path.
