@@ -173,10 +173,15 @@ components:
 # Design System: YAIF Proof Sheet
 
 **Scope: this document governs the web surface only — the single static page at
-`pages/index.html`.** It has no authority over the rest of the repository, which is a
+`docs/index.html`.** It has no authority over the rest of the repository, which is a
 Databricks Asset Bundle (YAML, Python, docs). Nothing here constrains `resources/`, `src/`,
-`docs/`, or `databricks.yml`; conversely, the bundle's conventions do not constrain these
-tokens. If you are working on the bundle, close this file.
+the markdown guides that share the `docs/` directory, or `databricks.yml`; conversely, the
+bundle's conventions do not constrain these tokens. If you are working on the bundle, close
+this file.
+
+The page sits in `docs/` because that is a native GitHub Pages source, not because it
+belongs to the markdown guides beside it. `docs/.nojekyll` keeps Pages from processing the
+directory.
 
 Everything below was read out of the built page. Where the direction contract in that file's
 `<body>` comment and the implementation disagree, the implementation is recorded and the
