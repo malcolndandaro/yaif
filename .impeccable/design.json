@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "generatedAt": "2026-08-25T00:00:00Z",
   "title": "Design System: YAIF Proof Sheet",
-  "scope": "Web surface only - the single static page at pages/index.html. This system has no authority over the rest of the repository, which is a Databricks Asset Bundle (YAML, Python, docs).",
+  "scope": "Web surface only - the single static page at docs/index.html. This system has no authority over the rest of the repository, which is a Databricks Asset Bundle (YAML, Python, docs), including the markdown guides that share the docs/ directory. The page lives in docs/ because that is a native GitHub Pages branch source; docs/.nojekyll keeps Pages from processing the directory.",
   "extensions": {
     "colorMeta": {
       "paper": {

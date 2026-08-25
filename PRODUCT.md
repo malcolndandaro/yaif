@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-Static HTML/CSS, single self-contained file at `pages/index.html`. No build step, no
+Static HTML/CSS, single self-contained file at `docs/index.html`. No build step, no
 framework, no JavaScript, and no local asset files: all texture and illustration is
 generated in CSS and inline SVG, so the page is one file that opens from the filesystem
 and from any static host.
@@ -21,13 +21,20 @@ platform sans. The fallback chain is therefore ordered to degrade to a real grot
 (`Archivo Black → Archivo → Helvetica Neue → Helvetica → Arial`) and must **never**
 include Impact or another condensed system display face.
 
-Publishing is deliberately **not** wired up yet (user decision). GitHub Pages cannot serve
-a `pages/` folder natively — its branch-deploy sources are only the branch root or `/docs`,
-and `/docs` in this repo is already the markdown guide set. Publishing `pages/` therefore
-requires a GitHub Actions workflow, which the user chose to defer. Consequence for design:
-the page must work when opened locally, so **every documentation link points at the
-GitHub blob URL** (`https://github.com/malcolndandaro/yaif/blob/main/docs/…`) rather than a
-relative `../docs/*.md` path that would 404 on a static host and render as raw text locally.
+**Publishing needs no build tooling.** The page lives at `docs/index.html` because `/docs`
+on the default branch is one of GitHub Pages' two native branch-deploy sources (the other
+being the repo root). Enabling it is a repo-settings change only — Settings → Pages →
+Source: *Deploy from a branch* → `main` / `/docs`. No Actions workflow, no `gh-pages`
+branch. `docs/.nojekyll` is present so Pages serves the directory verbatim instead of
+running it through Jekyll.
+
+Consequence: the page now sits **in the same directory as the seven markdown guides**, and
+that is exactly why **every documentation link must stay an absolute GitHub blob URL**
+(`https://github.com/malcolndandaro/yaif/blob/main/docs/…`). A relative link such as
+`quickstart.md` would resolve on the published site and serve the file as **unrendered raw
+markdown**, since Pages does not convert markdown with Jekyll disabled. Blob URLs render
+properly on GitHub and work identically from the filesystem, from the published site, and
+from a link pasted into Slack. Do not "simplify" them to relative paths.
 
 ## Users
 
