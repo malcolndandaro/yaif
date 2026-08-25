@@ -1,0 +1,613 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-25T00:00:00Z",
+  "title": "Design System: YAIF Proof Sheet",
+  "scope": "Web surface only - the single static page at pages/index.html. This system has no authority over the rest of the repository, which is a Databricks Asset Bundle (YAML, Python, docs).",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Warm Stock",
+        "canonical": "#FFF6E8",
+        "note": "Page ground, and the paper that breaks through every grain mask. Also the type colour on the blue field.",
+        "tonalRamp": [
+          "oklch(28% 0.02 85)",
+          "oklch(39% 0.02 85)",
+          "oklch(50% 0.02 85)",
+          "oklch(61% 0.02 85)",
+          "oklch(72% 0.02 85)",
+          "oklch(83% 0.02 85)",
+          "oklch(92% 0.02 85)",
+          "oklch(97% 0.02 85)"
+        ],
+        "rampNote": "Synthesised in OKLCH; the hex in `canonical` is the project's normative value."
+      },
+      "blue": {
+        "role": "primary",
+        "displayName": "Federal Blue",
+        "canonical": "#1E4FFF",
+        "note": "Structure and navigation: heavy rules, document-block frames, all link text, code function names, and the base layer of every display heading. The one ink used as a field with paper type.",
+        "tonalRamp": [
+          "oklch(15% 0.10 264)",
+          "oklch(26% 0.16 264)",
+          "oklch(37% 0.22 264)",
+          "oklch(48% 0.28 264)",
+          "oklch(59% 0.26 264)",
+          "oklch(70% 0.19 264)",
+          "oklch(83% 0.11 264)",
+          "oklch(95% 0.03 264)"
+        ],
+        "rampNote": "Synthesised in OKLCH; the hex in `canonical` is the project's normative value."
+      },
+      "pink": {
+        "role": "primary",
+        "displayName": "Fluoro Pink",
+        "canonical": "#FF3EA5",
+        "note": "Signal and action: display misregister, primary-button under-ink, focus ring, link hover, code keywords, drawn list markers, caution field, customer-run-only state.",
+        "tonalRamp": [
+          "oklch(15% 0.09 358)",
+          "oklch(26% 0.14 358)",
+          "oklch(37% 0.19 358)",
+          "oklch(48% 0.23 358)",
+          "oklch(59% 0.25 358)",
+          "oklch(70% 0.22 358)",
+          "oklch(83% 0.14 358)",
+          "oklch(95% 0.04 358)"
+        ],
+        "rampNote": "Synthesised in OKLCH; the hex in `canonical` is the project's normative value."
+      },
+      "sun": {
+        "role": "secondary",
+        "displayName": "Sunflower",
+        "canonical": "#FFD22A",
+        "note": "Surface only, never a voice. Fields, plates, hover washes, screens, under-ink, the hero disc. Never sets a type colour anywhere in the file.",
+        "tonalRamp": [
+          "oklch(20% 0.05 92)",
+          "oklch(31% 0.08 92)",
+          "oklch(42% 0.11 92)",
+          "oklch(53% 0.13 92)",
+          "oklch(64% 0.15 92)",
+          "oklch(75% 0.16 92)",
+          "oklch(87% 0.17 92)",
+          "oklch(96% 0.07 92)"
+        ],
+        "rampNote": "Synthesised in OKLCH; the hex in `canonical` is the project's normative value."
+      },
+      "violet": {
+        "role": "tertiary",
+        "displayName": "Violet Overprint",
+        "canonical": "#6A3DFF",
+        "note": "blue x pink. Semantic as well as decorative: it is the Oracle EPM swatch, because that module is the API module (blue) doing POST with Basic auth (pink).",
+        "tonalRamp": [
+          "oklch(15% 0.10 285)",
+          "oklch(26% 0.16 285)",
+          "oklch(37% 0.21 285)",
+          "oklch(48% 0.25 285)",
+          "oklch(59% 0.24 285)",
+          "oklch(70% 0.18 285)",
+          "oklch(83% 0.11 285)",
+          "oklch(95% 0.03 285)"
+        ],
+        "rampNote": "Synthesised in OKLCH; the hex in `canonical` is the project's normative value."
+      },
+      "tangerine": {
+        "role": "tertiary",
+        "displayName": "Tangerine Overprint",
+        "canonical": "#FF8A3C",
+        "note": "pink x sun. Painted in the separation figure and the colour bar only. Declared and displayed but carries NO semantic role in the built page - the unclaimed ink.",
+        "tonalRamp": [
+          "oklch(20% 0.06 50)",
+          "oklch(31% 0.09 50)",
+          "oklch(42% 0.12 50)",
+          "oklch(53% 0.15 50)",
+          "oklch(64% 0.17 50)",
+          "oklch(75% 0.17 50)",
+          "oklch(86% 0.11 50)",
+          "oklch(95% 0.04 50)"
+        ],
+        "rampNote": "Synthesised in OKLCH; the hex in `canonical` is the project's normative value."
+      },
+      "leaf": {
+        "role": "tertiary",
+        "displayName": "Leaf Overprint",
+        "canonical": "#23B36B",
+        "note": "blue x sun. Painted in the separation figure and the colour bar. Its darker run, #12734a, is the code string colour.",
+        "tonalRamp": [
+          "oklch(20% 0.06 155)",
+          "oklch(30% 0.09 155)",
+          "oklch(40% 0.12 155)",
+          "oklch(50% 0.15 155)",
+          "oklch(60% 0.17 155)",
+          "oklch(71% 0.15 155)",
+          "oklch(83% 0.09 155)",
+          "oklch(95% 0.03 155)"
+        ],
+        "rampNote": "Synthesised in OKLCH; the hex in `canonical` is the project's normative value."
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Blue at Full Density",
+        "canonical": "#101340",
+        "note": "All long-form copy, all code, and every heavy rule framing an ink field or data block. Reads near-black but stays in the blue family, which is why the page never feels like black-on-cream.",
+        "tonalRamp": [
+          "oklch(15% 0.07 275)",
+          "oklch(23% 0.10 275)",
+          "oklch(33% 0.11 275)",
+          "oklch(43% 0.11 275)",
+          "oklch(55% 0.11 275)",
+          "oklch(68% 0.09 275)",
+          "oklch(82% 0.06 275)",
+          "oklch(94% 0.02 275)"
+        ],
+        "rampNote": "Synthesised in OKLCH; the hex in `canonical` is the project's normative value."
+      },
+      "ink-mid": {
+        "role": "neutral",
+        "displayName": "Lighter Run",
+        "canonical": "#454a80",
+        "note": "Secondary copy only: separation metadata, chooser subtitles, captions, code notes, the imprint.",
+        "tonalRamp": [
+          "oklch(16% 0.06 278)",
+          "oklch(25% 0.08 278)",
+          "oklch(33% 0.09 278)",
+          "oklch(41% 0.10 278)",
+          "oklch(54% 0.10 278)",
+          "oklch(67% 0.08 278)",
+          "oklch(81% 0.05 278)",
+          "oklch(94% 0.02 278)"
+        ],
+        "rampNote": "Synthesised in OKLCH; the hex in `canonical` is the project's normative value."
+      },
+      "code-comment": {
+        "role": "neutral",
+        "displayName": "Comment Grey-Violet",
+        "canonical": "#4a4f78",
+        "note": "Code comments. Close enough to the lighter run that comments recede without changing family.",
+        "tonalRamp": [
+          "oklch(17% 0.05 280)",
+          "oklch(25% 0.07 280)",
+          "oklch(34% 0.08 280)",
+          "oklch(42% 0.08 280)",
+          "oklch(55% 0.08 280)",
+          "oklch(68% 0.06 280)",
+          "oklch(82% 0.04 280)",
+          "oklch(94% 0.02 280)"
+        ],
+        "rampNote": "Synthesised in OKLCH; the hex in `canonical` is the project's normative value."
+      },
+      "code-string": {
+        "role": "neutral",
+        "displayName": "Leaf at Full Density",
+        "canonical": "#12734a",
+        "note": "Code strings. The blue x sun overprint run darker so it clears AA on paper.",
+        "tonalRamp": [
+          "oklch(18% 0.05 158)",
+          "oklch(27% 0.07 158)",
+          "oklch(36% 0.09 158)",
+          "oklch(46% 0.11 158)",
+          "oklch(58% 0.12 158)",
+          "oklch(70% 0.11 158)",
+          "oklch(83% 0.07 158)",
+          "oklch(95% 0.02 158)"
+        ],
+        "rampNote": "Synthesised in OKLCH; the hex in `canonical` is the project's normative value."
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The page headline only, with a 4px pink misregister. hyphens:none and text-wrap:balance are both set - at this scale a hyphen or an orphan is a printing fault."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Band headings with a 3px misregister, and the medallion plate names at clamp(1.5rem,2.6vw,2.1rem) where the plate name IS the heading."
+      },
+      "deck": {
+        "displayName": "Deck",
+        "purpose": "The single paragraph under the headline, max 46ch, with blue bold spans inside it."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Framed-block headings - chooser header, make-ready header, sub-headings in prose. Regular Archivo, never the display face."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "All prose, max 68ch. Drops to 0.875rem / 0.8125rem inside framed blocks."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "The .tag role - section eyebrows, sheet stamp, block headers. Buttons and run-state chips are the same idea at 0.075em / 0.08em tracking."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Evidence only: code blocks, measured values, step counters, inline identifiers. Never a sentence."
+      }
+    },
+    "motion": [
+      {
+        "name": "take-ink",
+        "value": "0.72s cubic-bezier(.16,1,.3,1) both; from{opacity:0;transform:translate(var(--ix,-10px),var(--iy,7px)) scale(.985)}",
+        "purpose": "The one authored moment: ink shapes land in sequence. Applied to hero cut plates (0.05s/0.16s), scale-band shims (0.06/0.13/0.20s, bottom plate first), and colour-bar cells. Fires on load with no scroll trigger."
+      },
+      {
+        "name": "settle-reg",
+        "value": "0.8s cubic-bezier(.16,1,.3,1) both; from{transform:translate(calc(var(--mx,3px)*3.2),calc(var(--my,3px)*3.2))}",
+        "purpose": "Brings each misregister layer in from 3.2x its offset into register."
+      },
+      {
+        "name": "ease-ink",
+        "value": "cubic-bezier(.16,1,.3,1)",
+        "purpose": "The system's only easing curve. 0.18s for the button slip, 0.16s for glyph registration and the colophon marker."
+      },
+      {
+        "name": "ease-wash",
+        "value": "ease-out",
+        "purpose": "Outlier: the chooser row's sunflower hover wash uses plain ease-out at 0.16s rather than ease-ink."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "hero-2col",
+        "value": "1180px",
+        "purpose": "Hero drops to centre + chooser; the separation rail becomes a full-width row ordered last."
+      },
+      {
+        "name": "code-1col",
+        "value": "940px",
+        "purpose": "The two code blocks stack."
+      },
+      {
+        "name": "figure-1col",
+        "value": "900px",
+        "purpose": "Separation figure and scale band stack."
+      },
+      {
+        "name": "hero-1col",
+        "value": "860px",
+        "purpose": "Everything stacks, chooser ordered above the rail; registration crosses hidden, rotated pink cut plate dropped, sun disc shrunk."
+      },
+      {
+        "name": "grid-1col",
+        "value": "820px",
+        "purpose": "Medallion and cautions collapse to one column."
+      }
+    ],
+    "grain": {
+      "token": "--grain",
+      "value": "inline SVG feTurbulence, fractalNoise, baseFrequency 0.72, 4 octaves, stitchTiles, tiled 160px; red channel driven into alpha with a -0.22 offset so the lower quarter thresholds out",
+      "technique": "A PAPER-COLOURED layer masked by the noise (background:var(--paper) + mask-image:var(--grain)), so paper breaks through the ink. NOT a dark multiply on top - that desaturated the light inks by 15-20%.",
+      "coverage": {
+        "cut-plate": 0.34,
+        "ink-field": 0.3,
+        "swatch": 0.3,
+        "bullet": 0.3,
+        "colour-bar": 0.3,
+        "scale-shim": 0.28,
+        "table-header": 0.26,
+        "button": 0.2
+      },
+      "sheetFibre": "body::before, fixed, opacity 0.09, mix-blend-mode:multiply. The only multiply-based grain in the system.",
+      "svgFilter": "The separation figure reproduces the same coverage with an SVG filter that MUST be pinned color-interpolation-filters=\"sRGB\"; the default linearRGB compositing printed ~3x heavier and read as a dither. Its baseFrequency is 0.7 against the CSS token's 0.72 - a small unexplained divergence in the built file."
+    },
+    "rules": [
+      {
+        "name": "--rule",
+        "value": "1px",
+        "purpose": "Internal dividers and light frames."
+      },
+      {
+        "name": "--rule-heavy",
+        "value": "3px",
+        "purpose": "Structural frames and band separations. Blue frames document blocks; --ink frames fields and data blocks."
+      },
+      {
+        "name": "hairline-blue",
+        "value": "rgba(30,79,255,.28) / rgba(30,79,255,.3)",
+        "purpose": "Alpha-ink dividers between separation rows and chooser rows - divisions that should recede rather than read as printed rules."
+      },
+      {
+        "name": "hairline-ink",
+        "value": "rgba(16,19,64,.18) / rgba(16,19,64,.2)",
+        "purpose": "Alpha-ink dividers between table rows and caution cells."
+      },
+      {
+        "name": "row-tint",
+        "value": "rgba(30,79,255,.045)",
+        "purpose": "Even table rows only."
+      }
+    ],
+    "screens": [
+      {
+        "name": "screen-pink",
+        "value": "radial-gradient(circle,#FF3EA5 0 1.55px,transparent 1.75px) / 5px 5px",
+        "purpose": "An ink run at reduced density. The SQL Server query-based swatch (same ink as its CDC sibling) and the colour bar."
+      },
+      {
+        "name": "screen-blue",
+        "value": "radial-gradient(circle,#1E4FFF 0 1.55px,transparent 1.75px) / 5px 5px",
+        "purpose": "Colour bar only. Note: unlike screen-pink it does not set background-color:transparent - harmless today, inconsistent."
+      },
+      {
+        "name": "screen-sun-state",
+        "value": "radial-gradient(circle,#FFD22A 0 1.9px,transparent 2.1px) / 5px 5px",
+        "purpose": "Hand-rolled inline in the state-setup chip at a larger dot rather than going through the .screen-* classes. A small inconsistency in the built system."
+      }
+    ],
+    "measures": [
+      {
+        "name": "display",
+        "value": "22ch",
+        "purpose": "Band headings. The container above them must set no cap."
+      },
+      {
+        "name": "prose-band",
+        "value": "60ch",
+        "purpose": "Band-header paragraphs."
+      },
+      {
+        "name": "prose-global",
+        "value": "68ch",
+        "purpose": "All other paragraphs."
+      },
+      {
+        "name": "deck",
+        "value": "46ch"
+      },
+      {
+        "name": "caution",
+        "value": "64ch"
+      },
+      {
+        "name": "imprint",
+        "value": "62ch"
+      },
+      {
+        "name": "figure-caption",
+        "value": "40ch"
+      },
+      {
+        "name": "wordmark-expansion",
+        "value": "16ch"
+      }
+    ],
+    "contrast": [
+      {
+        "pair": "ink on paper",
+        "ratio": "16.5:1",
+        "verdict": "AAA"
+      },
+      {
+        "pair": "ink-mid on paper",
+        "ratio": "7.7:1",
+        "verdict": "AAA"
+      },
+      {
+        "pair": "code-comment on paper",
+        "ratio": "7.3:1",
+        "verdict": "AAA"
+      },
+      {
+        "pair": "ink on sun",
+        "ratio": "12.2:1",
+        "verdict": "AAA"
+      },
+      {
+        "pair": "code-string on paper",
+        "ratio": "5.5:1",
+        "verdict": "AA"
+      },
+      {
+        "pair": "ink on pink",
+        "ratio": "5.5:1",
+        "verdict": "AA"
+      },
+      {
+        "pair": "blue on paper",
+        "ratio": "5.4:1",
+        "verdict": "AA"
+      },
+      {
+        "pair": "paper on blue",
+        "ratio": "5.4:1",
+        "verdict": "AA"
+      },
+      {
+        "pair": "pink on paper",
+        "ratio": "3.0:1",
+        "verdict": "FAILS AA for normal text; clears 3:1 for large text and non-text UI. Affects link hover, the hot stamp chip at 11px, separation-name hover, and the pink keyword colour in code blocks."
+      }
+    ],
+    "knownOpen": [
+      "Pink text on paper is 3.0:1 - below AA for normal text. Most consequential in code blocks, since PRODUCT.md requires code to stay legible when projected.",
+      "take-ink fires on load with no scroll trigger, so the scale-band shims and colour bar animate off-screen.",
+      "Dead selectors: .venn .disc and the .d-blue / .d-pink / .d-sun delay classes match no element, so the separation figure's discs never animate.",
+      "The .ink / .ink>* primitive is declared in the stylesheet and never used in the markup.",
+      "The skip link targets #chooser rather than #main; <main id=\"main\"> exists and nothing links to it.",
+      "Horizontally scrollable regions (code <pre>, the 640px-min table) are not keyboard-focusable, so a keyboard-only user on a narrow viewport cannot scroll them.",
+      ".misreg::before uses content:attr(data-ink); generated content is announced by several screen readers, so display headings may be read twice, and a pseudo-element cannot be aria-hidden.",
+      "Many component rules name a bare font-family:Archivo or font-family:\"Spline Sans Mono\" with no fallback chain; the complete ordered chains exist only on body, .display and .mono.",
+      "body{overflow-x:hidden} suppresses the symptom of horizontal overflow rather than preventing it.",
+      ".caution-hd h2 reimplements the .display face inline (Archivo Black, uppercase, weight 400) at -0.02em instead of using the .display class and its -0.028em / 0.87 line-height.",
+      "Buttons have no :active state.",
+      "--tangerine is declared and painted in the colour bar and separation figure but carries no semantic role.",
+      "Glyph SVG fills are literal hex, not tokens - a token change must be mirrored into them by hand."
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Blue field, paper type, pink under-ink offset 4px and multiplied. Must never become a stacking context.",
+      "html": "<a class=\"ds-btn ds-btn-primary\" href=\"#\">Read the quickstart <svg class=\"ds-arw\" viewBox=\"0 0 16 16\" fill=\"none\" aria-hidden=\"true\"><path d=\"M2 8h11M9 4l4 4-4 4\" stroke=\"currentColor\" stroke-width=\"2\"/></svg></a>",
+      "css": ".ds-btn{position:relative;display:inline-flex;align-items:center;gap:.6rem;font-family:Archivo,\"Helvetica Neue\",Helvetica,Arial,sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:.075em;font-size:.8125rem;padding:.85rem 1.35rem;border:3px solid var(--ink,#101340);text-decoration:none;transition:transform .18s cubic-bezier(.16,1,.3,1)}.ds-btn-primary{background:var(--blue,#1E4FFF);color:var(--paper,#FFF6E8)}.ds-btn-primary::before{content:\"\";position:absolute;inset:0;background:var(--pink,#FF3EA5);transform:translate(4px,4px);mix-blend-mode:multiply;z-index:-1;transition:transform .18s cubic-bezier(.16,1,.3,1)}.ds-btn-primary::after{content:\"\";position:absolute;inset:0;pointer-events:none;background:var(--paper,#FFF6E8);-webkit-mask-image:var(--grain,url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 -0.22'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\"));mask-image:var(--grain,url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 -0.22'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\"));-webkit-mask-size:160px 160px;mask-size:160px 160px;opacity:.2}.ds-btn-primary:hover{transform:translate(2px,2px)}.ds-btn-primary:hover::before{transform:translate(7px,7px)}.ds-btn-primary:focus-visible{outline:3px solid var(--pink,#FF3EA5);outline-offset:3px}.ds-arw{width:1em;height:1em;flex:none}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Paper face (never transparent), blue type and frame, sunflower under-ink at 4px.",
+      "html": "<a class=\"ds-btn ds-btn-ghost\" href=\"#\">View the repo <svg class=\"ds-arw\" viewBox=\"0 0 16 16\" fill=\"none\" aria-hidden=\"true\"><path d=\"M2 8h11M9 4l4 4-4 4\" stroke=\"currentColor\" stroke-width=\"2\"/></svg></a>",
+      "css": ".ds-btn{position:relative;display:inline-flex;align-items:center;gap:.6rem;font-family:Archivo,\"Helvetica Neue\",Helvetica,Arial,sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:.075em;font-size:.8125rem;padding:.85rem 1.35rem;border:3px solid var(--ink,#101340);text-decoration:none;transition:transform .18s cubic-bezier(.16,1,.3,1)}.ds-btn-ghost{background:var(--paper,#FFF6E8);color:var(--blue,#1E4FFF);border-color:var(--blue,#1E4FFF)}.ds-btn-ghost::before{content:\"\";position:absolute;inset:0;background:var(--sun,#FFD22A);transform:translate(4px,4px);mix-blend-mode:multiply;z-index:-1;transition:transform .18s cubic-bezier(.16,1,.3,1)}.ds-btn-ghost::after{content:\"\";position:absolute;inset:0;pointer-events:none;background:var(--paper,#FFF6E8);-webkit-mask-image:var(--grain,url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 -0.22'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\"));mask-image:var(--grain,url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 -0.22'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\"));-webkit-mask-size:160px 160px;mask-size:160px 160px;opacity:.2}.ds-btn-ghost:hover{transform:translate(2px,2px)}.ds-btn-ghost:hover::before{transform:translate(7px,7px)}.ds-btn-ghost:focus-visible{outline:3px solid var(--pink,#FF3EA5);outline-offset:3px}.ds-arw{width:1em;height:1em;flex:none}"
+    },
+    {
+      "name": "Misregistered Display Heading",
+      "kind": "custom",
+      "description": "The display voice's signature. data-ink duplicates the text; a ::before renders it in pink, offset and multiplied, behind the blue. Offset scales with type size: 2px wordmark, 3px band heading, 4px page headline.",
+      "html": "<h2 class=\"ds-display ds-misreg\" data-ink=\"Five separations, one press\">Five separations, one press</h2>",
+      "css": ".ds-display{font-family:\"Archivo Black\",Archivo,\"Helvetica Neue\",Helvetica,Arial,sans-serif;font-weight:400;text-transform:uppercase;line-height:.87;letter-spacing:-.028em;margin:0;hyphens:none;text-wrap:balance;font-size:clamp(1.75rem,3.4vw,3rem)}.ds-misreg{position:relative;color:var(--blue,#1E4FFF);isolation:isolate}.ds-misreg::before{content:attr(data-ink);position:absolute;left:0;top:0;width:100%;color:var(--pink,#FF3EA5);transform:translate(var(--mx,3px),var(--my,3px));mix-blend-mode:multiply;z-index:-1;pointer-events:none}@media (prefers-reduced-motion:no-preference){.ds-misreg::before{animation:ds-settle-reg .8s cubic-bezier(.16,1,.3,1) both}@keyframes ds-settle-reg{from{transform:translate(calc(var(--mx,3px)*3.2),calc(var(--my,3px)*3.2))}}}"
+    },
+    {
+      "name": "Ink Field (sunflower)",
+      "kind": "card",
+      "refersTo": "field-sun",
+      "description": "A block or block header flooded with a spot ink, carrying the grain layer. Children are forced above the tooth so it never multiplies across type. Blue and pink variants swap the field and type colours.",
+      "html": "<div class=\"ds-field ds-f-sun\"><h2 class=\"ds-field-hd\">Which source are you landing?</h2><p class=\"ds-field-sub\">Pick the plate. Each one is a worked guide, not a stub.</p></div>",
+      "css": ".ds-field{position:relative;isolation:isolate;padding:.8rem 1rem}.ds-field::after{content:\"\";position:absolute;inset:0;pointer-events:none;z-index:0;background:var(--paper,#FFF6E8);-webkit-mask-image:var(--grain,url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 -0.22'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\"));mask-image:var(--grain,url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 -0.22'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\"));-webkit-mask-size:160px 160px;mask-size:160px 160px;opacity:.3}.ds-field>*{position:relative;z-index:1}.ds-f-sun{background:var(--sun,#FFD22A);color:var(--ink,#101340)}.ds-field-hd{font-family:Archivo,\"Helvetica Neue\",Helvetica,Arial,sans-serif;font-weight:700;font-size:1.0625rem;margin:0;letter-spacing:-.012em;line-height:1.25}.ds-field-sub{margin:.3rem 0 0;font-size:.8125rem;color:var(--ink,#101340);opacity:.85}"
+    },
+    {
+      "name": "Connector Plate Row",
+      "kind": "nav",
+      "refersTo": "plate-row",
+      "description": "One row of the connector chooser. Cut-paper two-layer glyph, name, subtitle, arrow. On hover a sunflower wash multiplies in and the glyph's two layers open registration.",
+      "html": "<a class=\"ds-plate\" href=\"#\"><span class=\"ds-glyph\" aria-hidden=\"true\"><svg viewBox=\"0 0 34 34\"><circle cx=\"13\" cy=\"13\" r=\"10\" fill=\"#1E4FFF\"/><circle class=\"ds-l2\" cx=\"21\" cy=\"21\" r=\"10\" fill=\"#FF3EA5\"/></svg></span><span><span class=\"ds-plate-nm\">A REST or HTTP API</span><span class=\"ds-plate-sub\">One, or hundreds. GET and POST with a body.</span></span><svg class=\"ds-go\" viewBox=\"0 0 16 16\" fill=\"none\" aria-hidden=\"true\"><path d=\"M2 8h11M9 4l4 4-4 4\" stroke=\"currentColor\" stroke-width=\"2\"/></svg></a>",
+      "css": ".ds-plate{display:grid;grid-template-columns:34px 1fr auto;gap:.75rem;align-items:center;padding:.72rem 1rem;text-decoration:none;color:var(--ink,#101340);position:relative;isolation:isolate;font-family:Archivo,\"Helvetica Neue\",Helvetica,Arial,sans-serif;border-bottom:1px solid rgba(30,79,255,.3)}.ds-plate::before{content:\"\";position:absolute;inset:0;background:var(--sun,#FFD22A);opacity:0;mix-blend-mode:multiply;z-index:-1;transition:opacity .16s ease-out}.ds-plate:hover::before,.ds-plate:focus-visible::before{opacity:1}.ds-glyph{width:34px;height:34px;flex:none;transition:transform .16s cubic-bezier(.16,1,.3,1)}.ds-glyph svg{display:block;width:100%;height:100%}.ds-l2{transition:transform .16s cubic-bezier(.16,1,.3,1);mix-blend-mode:multiply}.ds-plate:hover .ds-glyph,.ds-plate:focus-visible .ds-glyph{transform:translate(-2px,-2px)}.ds-plate:hover .ds-l2,.ds-plate:focus-visible .ds-l2{transform:translate(4px,4px)}.ds-plate-nm{font-weight:700;font-size:.9375rem;line-height:1.25;letter-spacing:-.01em;display:block}.ds-plate-sub{font-size:.75rem;color:var(--ink-mid,#454a80);line-height:1.3;display:block;margin-top:.1rem}.ds-go{color:var(--blue,#1E4FFF);width:.95rem;height:.95rem;flex:none}.ds-plate:focus-visible{outline:3px solid var(--pink,#FF3EA5);outline-offset:3px}"
+    },
+    {
+      "name": "Run-State Chip",
+      "kind": "chip",
+      "refersTo": "state-ships",
+      "description": "Run state as escalating ink density, never invented status colours. Outline blue = ships now; screened sunflower = needs external setup; solid pink = customer-run only.",
+      "html": "<span class=\"ds-state ds-st-run\">In the deploy glob</span> <span class=\"ds-state ds-st-setup\">Needs a UC connection</span> <span class=\"ds-state ds-st-cust\">Customer-run only</span>",
+      "css": ".ds-state{display:inline-block;padding:.1rem .35rem;font-family:Archivo,\"Helvetica Neue\",Helvetica,Arial,sans-serif;font-weight:700;font-size:.6875rem;letter-spacing:.08em;text-transform:uppercase;border:1px solid currentColor}.ds-st-run{color:var(--blue,#1E4FFF);border-color:var(--blue,#1E4FFF)}.ds-st-setup{color:var(--ink,#101340);border-color:var(--ink,#101340);background-image:radial-gradient(circle,var(--sun,#FFD22A) 0 1.9px,transparent 2.1px);background-size:5px 5px}.ds-st-cust{color:var(--ink,#101340);border-color:var(--ink,#101340);background:var(--pink,#FF3EA5)}"
+    },
+    {
+      "name": "Sheet Stamp Chip",
+      "kind": "chip",
+      "refersTo": "chip-stamp",
+      "description": "Masthead metadata chips: 1px blue frame and blue type, with a pink hot variant. Note the hot variant is 3.0:1 on paper at 11px and is the page's one contrast failure.",
+      "html": "<span class=\"ds-chip\">Databricks Lakeflow</span> <span class=\"ds-chip ds-chip-hot\">Proof sheet &middot; unpublished</span>",
+      "css": ".ds-chip{display:inline-block;font-family:Archivo,\"Helvetica Neue\",Helvetica,Arial,sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:.11em;font-size:.6875rem;line-height:1.3;border:1px solid var(--blue,#1E4FFF);padding:.3rem .55rem;color:var(--blue,#1E4FFF)}.ds-chip-hot{border-color:var(--pink,#FF3EA5);color:var(--pink,#FF3EA5)}"
+    },
+    {
+      "name": "Code Block",
+      "kind": "custom",
+      "refersTo": "code-block",
+      "description": "The page's evidence. Blue 3px frame, label header with the source path in mono, four syntax inks. Never truncated, never decorated.",
+      "html": "<div class=\"ds-codeblk\"><div class=\"ds-codeblk-hd\"><span class=\"ds-tag\">The transform pattern</span><span class=\"ds-fn\">src/transformations/silver_api_records.py</span></div><pre><code><span class=\"ds-c-fn\">@dp.temporary_view</span>()\n<span class=\"ds-c-kw\">def</span> <span class=\"ds-c-fn\">silver_api_records_parsed</span>():\n    <span class=\"ds-c-kw\">return</span> (\n        spark.readStream.table(<span class=\"ds-c-st\">\"bronze_api_responses\"</span>)\n        .transform(parse_json_records)      <span class=\"ds-c-cm\"># body STRING -&gt; _records array</span>\n    )</code></pre></div>",
+      "css": ".ds-codeblk{border:3px solid var(--blue,#1E4FFF);background:var(--paper,#FFF6E8)}.ds-codeblk-hd{display:flex;justify-content:space-between;align-items:center;gap:.75rem;padding:.6rem .85rem;border-bottom:1px solid var(--blue,#1E4FFF);flex-wrap:wrap}.ds-tag{font-family:Archivo,\"Helvetica Neue\",Helvetica,Arial,sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:.11em;font-size:.6875rem;line-height:1.3;color:var(--blue,#1E4FFF)}.ds-fn{font-family:\"Spline Sans Mono\",ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.6875rem;opacity:.7;color:var(--ink,#101340)}.ds-codeblk pre{margin:0;padding:.9rem .85rem 1rem;overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--blue,#1E4FFF) transparent;font-family:\"Spline Sans Mono\",ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.8125rem;line-height:1.65;color:var(--ink,#101340)}.ds-codeblk pre code{font:inherit}.ds-c-kw{color:var(--pink,#FF3EA5);font-weight:600}.ds-c-fn{color:var(--blue,#1E4FFF);font-weight:600}.ds-c-cm{color:#4a4f78}.ds-c-st{color:#12734a}"
+    },
+    {
+      "name": "Halftone Screen Swatch",
+      "kind": "custom",
+      "description": "A 26px ink swatch from the separation rail. Solid for a module's own ink, screened at 5px pitch for a sibling pattern of the same module, overprint hex where the module IS an overprint. Carries the grain layer.",
+      "html": "<span class=\"ds-swatch\" style=\"background:#1E4FFF\"></span> <span class=\"ds-swatch ds-screen-pink\"></span> <span class=\"ds-swatch\" style=\"background:#6A3DFF\"></span>",
+      "css": ".ds-swatch{display:inline-block;width:26px;height:26px;border:1px solid var(--ink,#101340);position:relative;isolation:isolate;vertical-align:middle}.ds-swatch::after{content:\"\";position:absolute;inset:0;pointer-events:none;background:var(--paper,#FFF6E8);-webkit-mask-image:var(--grain,url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 -0.22'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\"));mask-image:var(--grain,url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 -0.22'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E\"));-webkit-mask-size:160px 160px;mask-size:160px 160px;opacity:.3}.ds-screen-pink{background-color:transparent;background-image:radial-gradient(circle,var(--pink,#FF3EA5) 0 1.55px,transparent 1.75px);background-size:5px 5px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Press Proof Sheet",
+    "overview": "This is a Risograph proof sheet, not a poster about one. The page behaves like a sheet that has been through a duplicator: warm uncoated stock (#FFF6E8), three spot inks laid down in sequence, visible misregistration where a plate landed a few points off, mechanical grain in every flooded area, and the press operator's own furniture - registration crosses at the corners of the pull, a nine-cell colour bar at the foot. The metaphor is load-bearing rather than decorative: five ingestion modules are drawn as five ink separations, and the places where inks overprint are the places where code is genuinely shared. The direction contract names the thesis plainly - a duplicator, not a framework; 900 endpoints become 45 masters.\n\nDensity is high and deliberately unpadded. Structure is asserted with 3px ink rules and shared edges rather than with cards floating on whitespace: the medallion is three plates of one run sharing borders, the comparison table is one bordered block, the connector chooser is a single ruled column. Nothing is rounded, nothing is shadowed, nothing glows. The page is loud in colour and quiet in geometry.\n\nTwo anti-references are stated in the contract and both hold in the build: it refuses the dev-tool dark-hero-with-gradient page, and it refuses the print-studio marketing page this visual world usually produces. The tell that it stayed on the right side of the second one is that every ink decision is doing informational work - run states are ink densities, the sibling SQL Server pattern is the same ink at screen, and the Oracle EPM module is literally the blue-over-pink overprint because it is the API module with a different auth mode.",
+    "keyCharacteristics": [
+      "Warm stock, never white; three spot inks plus three declared overprints.",
+      "Zero border radius except one sunflower disc; depth comes from ink order, never shadow.",
+      "Grain on every flooded ink area, achieved by letting paper break through - not by darkening.",
+      "Archivo Black display with a real second pink ink layer offset 3-4px and multiplied.",
+      "Mono reserved for code and measured values; never for a sentence.",
+      "Cut-paper geometry is the entire icon language - no icon library anywhere on the page.",
+      "One authored motion moment (the sheet taking ink), fully gated behind reduced-motion."
+    ],
+    "rules": [
+      {
+        "name": "The Painted Overprint Rule",
+        "section": "colors",
+        "body": "An overprint that the page asserts is painted at its declared hex. An overlap that is merely decorative is multiplied. mix-blend-mode:multiply between two saturated spot inks can only travel darker, and every declared overprint is lighter than at least one parent - multiplying #1E4FFF with #FF3EA5 can never arrive at #6A3DFF. So in the separation figure each intersection is drawn as its own clipped region filled with the declared ink, and the colour bar paints all three overprints as flat swatches. Multiply is used only where nobody is claiming a specific result: the hero's cut plates, the display misregister layer, the button under-ink, the chooser hover wash, and the icons' second layer. If you can name the colour the overlap should be, paint it. If you can't, multiply it."
+      },
+      {
+        "name": "The Screen-Not-New-Ink Rule",
+        "section": "colors",
+        "body": "A relationship between two things gets expressed as the same ink at reduced density, never as a fourth hue. SQL Server query-based is the pink separation at screen because it is the SQL Server module's sibling pattern. Adding a new spot colour to express a variant is how this system dies."
+      },
+      {
+        "name": "The Sunflower-Never-Speaks Rule",
+        "section": "colors",
+        "body": "Sunflower is a surface, never a voice. No text, no icon stroke, no rule is ever #FFD22A. Ink text sits on it at 12.2:1; the reverse never happens."
+      },
+      {
+        "name": "The Mono-Is-Evidence Rule",
+        "section": "typography",
+        "body": "Spline Sans Mono marks something the reader could verify: a code sample, a file path, an identifier, a counted row. It is never used for a sentence, a label, or atmosphere. Inline <code class=\"mono\"> inside prose is correct - that is an identifier, not prose. A mono paragraph is not."
+      },
+      {
+        "name": "The No-Condensed-Fallback Rule",
+        "section": "typography",
+        "body": "The display fallback chain must degrade to a real grotesk and must never contain Impact or another condensed system display face. Losing Archivo Black should cost weight, not proportion. This is a written brand commitment in PRODUCT.md, not a preference."
+      },
+      {
+        "name": "The Measure-Once Rule",
+        "section": "typography",
+        "body": "Do not cap a heading's container and the heading separately. An earlier build put a 58ch cap on the band header block, which silently overrode the heading's own 22ch and reflowed it wrong. Display sets 22ch, prose sets 60ch inside a band header and 68ch globally, and the container sets nothing."
+      },
+      {
+        "name": "The Wrap-Your-Prose Rule",
+        "section": "layout",
+        "body": "A grid child that carries text must hold that text in a wrapping element. Inside a display:grid list item, every bare text run and every inline <code> becomes its own grid item and the layout shears. This is the single most common way to break this layout."
+      },
+      {
+        "name": "The Furniture Rule",
+        "section": "layout",
+        "body": "Registration crosses, the colour bar, and the sheet stamp are press furniture: they sit at the edges of the sheet, never inside content, and they are all aria-hidden. Furniture may be removed at narrow widths. It may never become content."
+      },
+      {
+        "name": "The Flat-Ink Rule",
+        "section": "elevation",
+        "body": "Nothing on this page is lit. No box-shadow, no gradient, no blur, no glow, no backdrop-filter. If something needs to come forward, give it a second impression or a heavier rule."
+      },
+      {
+        "name": "The Button-Is-Not-A-Stacking-Context Rule",
+        "section": "elevation",
+        "body": ".btn must not carry isolation:isolate. If it becomes a stacking context, its z-index:-1 under-ink paints above its own background instead of behind it, and the second ink multiplies across the whole face. The inverse holds for .misreg, which does isolate - safely, because it has no background of its own. The distinction is background, not element type: isolate an ink layer's parent only when that parent is transparent."
+      },
+      {
+        "name": "The Ink-Density State Rule",
+        "section": "components",
+        "body": "Run state is expressed as escalating ink density, never as invented status colours. Outline blue = ships now (in the deploy glob). Screened sunflower = needs external setup. Solid pink = customer-run only. Three levels, one grammar; a green / amber / red palette would be a different design system."
+      },
+      {
+        "name": "The Drawn-Marker Rule",
+        "section": "components",
+        "body": "No unicode glyph ever stands in for an icon or a bullet. List markers are drawn ink rules or authored SVG shapes; step numbers are mono digits in a 1px blue box. If you find yourself typing a dash, an arrow, or a bullet character, draw it instead."
+      },
+      {
+        "name": "The One-Moment Rule",
+        "section": "motion",
+        "body": "The page gets one authored motion idea - the sheet taking ink - and state changes get the same easing at a shorter duration. Nothing else moves. No scroll parallax, no reveal-on-scroll, no looping ambient motion."
+      }
+    ],
+    "dos": [
+      "Do paint an overprint you can name (#6A3DFF, #FF8A3C, #23B36B) and multiply an overlap you can't. Multiply between two saturated spot inks can only go darker.",
+      "Do apply grain as a paper-coloured layer masked by --grain, at 0.20-0.34 depending on area, with lower coverage where type sits directly on the ink.",
+      "Do pin color-interpolation-filters=\"sRGB\" on any SVG grain filter, or it prints ~3x heavy and reads as a dither.",
+      "Do express a variant as the same ink at screen (5px pitch) rather than as a new hue.",
+      "Do keep .field > * at position:relative; z-index:1 so the tooth never multiplies across type.",
+      "Do give every new ink layer's parent isolation:isolate only when that parent is transparent; a parent with its own background must not isolate.",
+      "Do carry prose inside a wrapping element when it lives in a display:grid child.",
+      "Do cap the measure in exactly one place: 22ch on display, 60-68ch on prose, and nothing on the container.",
+      "Do draw new icons as flat cut-paper geometry in two layers, and mirror any token change into their literal hex fills.",
+      "Do keep mono for code, paths, identifiers and measured values."
+    ],
+    "donts": [
+      "Don't add isolation:isolate to .btn. The under-ink will paint over the button face.",
+      "Don't make a ghost button's face transparent. The second impression must show only at the offset.",
+      "Don't use #FFD22A as a type, stroke, or rule colour. Sunflower is a surface only.",
+      "Don't set pink as small text on paper - it is 3.0:1. Use it as a field with ink type, or at large sizes, or as a non-text signal.",
+      "Don't introduce a fourth spot ink or a green/amber/red status palette. Run state is an ink-density ramp: outline blue, screened sunflower, solid pink.",
+      "Don't add a box-shadow, gradient, blur, or glow. Depth is under-ink, misregistration, overlap, and shared edges.",
+      "Don't round a corner. The only radii in the system are one 50% disc and the inherit that clips its grain.",
+      "Don't put Impact or any condensed system display face in the fallback chain.",
+      "Don't let mono carry a sentence, and don't let a typed dash, arrow, or bullet character stand in for a drawn mark.",
+      "Don't add a second motion idea, a scroll-triggered reveal, or any ambient loop. One authored moment, one easing curve.",
+      "Don't put a token helper or a new global rule inside a component block and assume the cascade will sort it out - this page has no build step and no specificity safety net."
+    ]
+  }
+}
