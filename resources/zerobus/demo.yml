@@ -1,0 +1,113 @@
+# Zerobus module — self-contained streaming-push demo (synthetic IoT events).
+# The zerobus pattern: an external producer pushes records STRAIGHT into a managed
+# Delta table over the Zerobus gRPC API (no message bus, no files) and the SDP
+# medallion reads that table as bronze. This demo stands in for a real producer —
+# apps/IoT devices emitting events — the same way seed_demo_parquet stands in for a
+# connector on the files module.
+#
+# Runtime prerequisites (one-time workspace setup, like the API module's HTTP
+# connection): a UC secret scope named by var.zerobus_secret_scope holding the
+# producer service principal's OAuth credentials as `client_id` / `client_secret`.
+# The prepare task creates the bronze table and grants the SP — deploy succeeds
+# without the scope; the PUSH task fails without it. See docs/zerobus.md.
+#
+# The producer task runs on a CLASSIC single-node job cluster because the Zerobus
+# SDK cannot pip-install on serverless compute. Everything downstream is serverless
+# as usual. Safe to deploy anywhere; delete once you have a real producer.
+resources:
+  schemas:
+    zerobus_demo_schema:
+      catalog_name: ${var.catalog}
+      name: yaif_zerobus_demo
+      comment: "YAIF zerobus module — streaming-push demo (SDK producer + SDP medallion)"
+
+  pipelines:
+    zerobus_demo_ingestion:
+      name: "[${bundle.target}] yaif-zerobus-demo"
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.zerobus_demo_schema.name}
+      serverless: true
+      photon: true
+      # root_path puts src/ on sys.path at pipeline runtime, so the medallion files can
+      # `from shared.… import …` (the transform-pattern helpers). The glob below still
+      # decides which files are pipeline SOURCE — src/shared/ is deliberately outside it.
+      root_path: ../../src
+      libraries:
+        - glob:
+            include: ../../src/zerobus/**
+      configuration:
+        # The Zerobus TARGET table (created by the prepare task, written by the push
+        # task) — bronze for this module.
+        bronze_table: "${var.catalog}.${resources.schemas.zerobus_demo_schema.name}.zerobus_events"
+      continuous: false
+      notifications:
+        - email_recipients:
+            - ${workspace.current_user.userName}
+          alerts:
+            - on-update-failure
+            - on-update-fatal-failure
+            - on-flow-failure
+      permissions:
+        - level: CAN_VIEW
+          group_name: ${var.viewers_group}
+
+  jobs:
+    zerobus_demo_push_and_pipeline:
+      name: "[${bundle.target}] yaif-zerobus-demo"
+      description: "Zerobus demo: prepare bronze -> SDK push -> SDP medallion"
+      job_clusters:
+        - job_cluster_key: producer
+          new_cluster:
+            # Classic single node: the Zerobus SDK cannot pip-install on serverless.
+            spark_version: "16.4.x-scala2.13"
+            data_security_mode: SINGLE_USER
+            node_type_id: i3.xlarge
+            num_workers: 0
+            spark_conf:
+              # Modern DBR: single-node = num_workers 0 + an access mode. The legacy
+              # spark.databricks.cluster.profile=singleNode conf is REJECTED by the
+              # Jobs API when data_security_mode is set (400 INVALID_PARAMETER_VALUE).
+              spark.master: local[*]
+      tasks:
+        - task_key: prepare
+          notebook_task:
+            notebook_path: ../../src/jobs/prepare_zerobus_table.py
+            base_parameters:
+              table_name: "${var.catalog}.${resources.schemas.zerobus_demo_schema.name}.zerobus_events"
+              secret_scope: ${var.zerobus_secret_scope}
+          job_cluster_key: producer
+          # Retry infra-level failures (cluster start, library install) and bound runtime.
+          max_retries: 2
+          timeout_seconds: 1800
+        - task_key: push
+          depends_on:
+            - task_key: prepare
+          notebook_task:
+            notebook_path: ../../src/jobs/push_zerobus_events.py
+            base_parameters:
+              server_endpoint: ${var.zerobus_server_endpoint}
+              table_name: "${var.catalog}.${resources.schemas.zerobus_demo_schema.name}.zerobus_events"
+              secret_scope: ${var.zerobus_secret_scope}
+              event_count: ${var.zerobus_event_count}
+              duplicate_pct: ${var.zerobus_duplicate_pct}
+          # Task-level: the Zerobus SDK cannot pip-install on serverless, so the push
+          # task carries it onto the classic job cluster (prepare doesn't import it).
+          libraries:
+            - pypi:
+                package: "databricks-zerobus-ingest-sdk>=1.0.0"
+          job_cluster_key: producer
+          max_retries: 2
+          timeout_seconds: 1800
+        - task_key: run_pipeline
+          depends_on:
+            - task_key: push
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.zerobus_demo_ingestion.id}
+      queue:
+        enabled: true
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}
+      permissions:
+        - level: CAN_VIEW
+          group_name: ${var.viewers_group}

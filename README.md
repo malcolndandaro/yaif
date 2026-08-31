@@ -129,7 +129,8 @@ yaif/
 ├── databricks.yml          # bundle + shared vars + dev/prod targets
 ├── resources/              # deploy glob (resources/*/*.yml) — what ships
 │   ├── api/                #   one file per API business domain (+ echo demo)
-│   └── files/              #   self-contained files demo
+│   ├── files/              #   self-contained files demo
+│   └── zerobus/            #   self-contained streaming-push (Zerobus) demo
 ├── examples/               # activate-by-moving templates (need external setup)
 │   ├── api/                #   control table, generated sample, Oracle EPM template
 │   ├── sqlserver/          #   CDC + query-based Lakeflow Connect templates
@@ -144,6 +145,7 @@ yaif/
 |---|---|
 | A REST / HTTP API — one, or hundreds | [docs/api-ingestion.md](docs/api-ingestion.md) |
 | Files a tool drops in a bucket (Parquet/CSV/JSON) | [docs/files.md](docs/files.md) |
+| Your app emits events (streaming push, no message bus) | [docs/zerobus.md](docs/zerobus.md) |
 | A SQL Server database | [docs/sqlserver.md](docs/sqlserver.md) |
 | Oracle EPM (or any POST + Basic-auth API) | [docs/oracle-epm.md](docs/oracle-epm.md) |
 

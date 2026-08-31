@@ -568,6 +568,14 @@ tbody tr:nth-child(even){background:rgba(30,79,255,.045)}
             <span class="state st-run">In the deploy glob</span>
           </span>
         </a></li>
+        <li><a class="sep" href="https://github.com/malcolndandaro/yaif/blob/main/docs/zerobus.md">
+          <span class="swatch" style="background:var(--leaf)" aria-hidden="true"></span>
+          <span>
+            <span class="sep-name">Streaming push (Zerobus)</span>
+            <span class="sep-meta">Kelly green, solid. Apps push records over gRPC, no message bus. Durability ACKs.</span>
+            <span class="state st-run">In the deploy glob</span>
+          </span>
+        </a></li>
         <li><a class="sep" href="https://github.com/malcolndandaro/yaif/blob/main/docs/sqlserver.md">
           <span class="swatch" style="background:var(--pink)" aria-hidden="true"></span>
           <span>
@@ -650,6 +658,11 @@ databricks bundle deploy -t dev</code></pre>
           <li class="plate"><a href="https://github.com/malcolndandaro/yaif/blob/main/docs/files.md">
             <span class="glyph" aria-hidden="true"><svg viewBox="0 0 34 34"><path d="M4 26 15 8l11 18z" fill="#FFD22A"/><rect class="l2" x="14" y="16" width="16" height="12" fill="#1E4FFF"/></svg></span>
             <span><span class="plate-nm">Files a tool drops in a bucket</span><span class="plate-sub">Parquet, CSV, JSON, including SAP via a connector.</span></span>
+            <svg class="go" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 8h11M9 4l4 4-4 4" stroke="currentColor" stroke-width="2"/></svg>
+          </a></li>
+          <li class="plate"><a href="https://github.com/malcolndandaro/yaif/blob/main/docs/zerobus.md">
+            <span class="glyph" aria-hidden="true"><svg viewBox="0 0 34 34"><path d="M17 3 31 17 17 31 3 17z" fill="#23B36B"/><circle class="l2" cx="17" cy="17" r="6" fill="#FFD22A"/></svg></span>
+            <span><span class="plate-nm">Your app emits events</span><span class="plate-sub">Streaming push over Zerobus — no message bus, durability ACKs.</span></span>
             <svg class="go" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 8h11M9 4l4 4-4 4" stroke="currentColor" stroke-width="2"/></svg>
           </a></li>
           <li class="plate"><a href="https://github.com/malcolndandaro/yaif/blob/main/docs/sqlserver.md">
@@ -1001,6 +1014,7 @@ databricks bundle run <span class="c-fn">files_demo_seed_and_pipeline</span> -t 
         <ul>
           <li><a href="https://github.com/malcolndandaro/yaif/blob/main/docs/api-ingestion.md">API ingestion</a></li>
           <li><a href="https://github.com/malcolndandaro/yaif/blob/main/docs/files.md">Files</a></li>
+          <li><a href="https://github.com/malcolndandaro/yaif/blob/main/docs/zerobus.md">Zerobus</a></li>
           <li><a href="https://github.com/malcolndandaro/yaif/blob/main/docs/sqlserver.md">SQL Server</a></li>
           <li><a href="https://github.com/malcolndandaro/yaif/blob/main/docs/oracle-epm.md">Oracle EPM</a></li>
         </ul>
