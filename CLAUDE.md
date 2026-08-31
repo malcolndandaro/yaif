@@ -199,9 +199,9 @@ yaif/
 
 ## Environment / how to test
 
-- **Default workspace = profile `dbc-ea097edd-802e`** (https://dbc-ea097edd-802e.cloud.databricks.com,
-  workspace id 7474648509963227, us-west-2), catalog `yaif` (the `var.catalog` default) —
-  a UC-enabled workspace with serverless jobs + pipelines. This replaced the earlier
+- **Default workspace = profile `dbc-ea097edd-802e`** (us-west-2; host lives in
+  `~/.databrickscfg`, not committed — repo convention), catalog `yaif` (the
+  `var.catalog` default) — a UC-enabled workspace with serverless jobs + pipelines. This replaced the earlier
   sandbox (profile `sqlserver-ws` = dbc-f9cc83ac-844b), which has been RETIRED — the SQL
   Server gateway that lived there is gone with it (the `examples/sqlserver/` templates
   remain valid; re-verify them on a workspace that has the UC connection). The zerobus
