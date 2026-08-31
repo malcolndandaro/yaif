@@ -1,13 +1,13 @@
 # YAIF — Yet Another Ingestion Framework
 
-A Databricks **Lakeflow** reference for landing **REST APIs, files, and SQL Server**
-into Unity Catalog. One Asset Bundle, consistent conventions, a bronze → silver → gold
+A Databricks **Lakeflow** reference for landing **REST APIs, files, streaming events
+(Zerobus), and SQL Server** into Unity Catalog. One Asset Bundle, consistent conventions, a bronze → silver → gold
 medallion per source with **AUTO CDC SCD-1** dedup. Onboarding a new source is a file
 copy — **zero new framework code**.
 
 It's an *umbrella repo, not an abstraction layer*: where Databricks already provides a
 declarative primitive (Lakeflow Connect, SDP), YAIF just configures it. All modules are
-built and verified end-to-end on the sandbox.
+built and verified end-to-end on the test-bed workspace.
 
 ## What's in here
 
@@ -15,6 +15,7 @@ built and verified end-to-end on the sandbox.
 |---|---|---|---|
 | **API** | REST / HTTP APIs (one, or hundreds) | Governed UC HTTP fetch → SDP medallion; control-table driven; GET & POST/body | [docs/api-ingestion.md](docs/api-ingestion.md) |
 | **Files** | Parquet / CSV / JSON in a bucket (incl. SAP via a connector) | Auto Loader (`cloudFiles`) over a UC Volume → SDP medallion | [docs/files.md](docs/files.md) |
+| **Zerobus** | Events your apps emit (streaming push, no message bus) | Producer pushes records over gRPC with durability ACKs → SDP medallion; at-least-once re-deliveries deduped in silver | [docs/zerobus.md](docs/zerobus.md) |
 | **SQL Server — CDC** | A SQL Server DB *with* CDC / Change Tracking | Lakeflow Connect: continuous gateway + ingestion; full change & delete history | [docs/sqlserver.md](docs/sqlserver.md) |
 | **SQL Server — query-based** | A SQL Server DB *without* CDC/CT | Lakeflow Connect: scheduled cursor-driven pulls, no gateway | [docs/sqlserver.md](docs/sqlserver.md) |
 | **Oracle EPM** *(example)* | Oracle EPM `exportdataslice` (POST + Basic auth) | Customer-run template for POST/body/Basic-auth APIs | [docs/oracle-epm.md](docs/oracle-epm.md) |

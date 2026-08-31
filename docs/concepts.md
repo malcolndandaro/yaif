@@ -36,8 +36,9 @@ environment-aware plumbing for free. The API module versus a typical hand-rolled
 | Observability | none | `gold_api_endpoint_health` MV (success rate, errors, body size) |
 | Failure alerting | none | Email notifications on job + pipeline failure |
 
-The SQL Server and files modules buy the same consistency without custom code — they
-configure a managed Databricks primitive the same governed, dev/prod-aware way.
+The SQL Server, files, and zerobus modules buy the same consistency without custom code —
+they configure a managed Databricks primitive (or the Zerobus service) the same governed,
+dev/prod-aware way.
 
 ## Design principles
 
@@ -170,8 +171,10 @@ yaif/
 │   │   ├── content_domain.yml        #     schema yaif_content + pipeline + job (posts, comments, albums, photos) — GET, connection auth
 │   │   ├── people_domain.yml         #     schema yaif_people  + pipeline + job (users, todos) — GET, connection auth
 │   │   └── echo_post_demo.yml        #     data-safe POST+body+Basic+VARIANT demo (postman-echo; silver_shape=document)
-│   └── files/
-│       └── demo.yml                  #   files module self-contained demo (MANAGED volume + synthetic seeder) — in glob
+│   ├── files/
+│   │   └── demo.yml                  #   files module self-contained demo (MANAGED volume + synthetic seeder) — in glob
+│   └── zerobus/
+│       └── demo.yml                  #   zerobus module self-contained demo (SDK producer -> SDP medallion) — in glob
 ├── examples/                         # ACTIVATE-BY-MOVING units — OUTSIDE the glob (need external setup)
 │   ├── api/epm_domain.yml            #   Oracle EPM exportdataslice template — CUSTOMER-RUN-ONLY (basic_secret + POST + silver_shape=document)
 │   ├── api/control_table.{csv,sql}   #   API endpoint control table (incl. optional body/auth_mode/silver_shape columns)
