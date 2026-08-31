@@ -93,8 +93,10 @@ yaif/
 │   │   ├── content_domain.yml        #   schema yaif_content + pipeline + job (posts, comments, albums, photos) — GET, connection auth
 │   │   ├── people_domain.yml         #   schema yaif_people  + pipeline + job (users, todos) — GET, connection auth
 │   │   └── echo_post_demo.yml        #   data-safe POST+body+Basic-auth+VARIANT demo (postman-echo, mock creds; silver_shape=document)
-│   └── files/
-│       └── demo.yml                  # files module self-contained demo (MANAGED volume + synthetic seeder) — in glob, deploys cleanly
+│   ├── files/
+│   │   └── demo.yml                  # files module self-contained demo (MANAGED volume + synthetic seeder) — in glob, deploys cleanly
+│   └── zerobus/
+│       └── demo.yml                  # zerobus module self-contained demo (SDK push -> SDP medallion) — in glob; push needs the secret scope
 ├── examples/                         # activate-by-moving units — OUTSIDE the include glob (need external setup)
 │   ├── api/epm_domain.yml            #   Oracle EPM exportdataslice template — CUSTOMER-RUN-ONLY (basic_secret + POST + silver_shape=document, placeholder host)
 │   ├── api/control_table.{csv,sql}   #   API endpoint control table (now incl. optional body/auth_mode/silver_shape columns)
@@ -110,16 +112,21 @@ yaif/
     │   └── file_lineage.py           #   with_source_file_lineage (_metadata -> real columns)
     ├── jobs/
     │   ├── fetch_api_responses.py    # API: threaded UC-connection fetch -> Delta landing table
-    │   └── seed_demo_parquet.py      # files demo: writes synthetic Parquet into the demo volume (stands in for a connector)
+    │   ├── seed_demo_parquet.py      # files demo: writes synthetic Parquet into the demo volume (stands in for a connector)
+    │   ├── prepare_zerobus_table.py  # zerobus demo: creates the bronze table + grants the producer SP (Zerobus never creates tables)
+    │   └── push_zerobus_events.py    # zerobus demo: the SDK producer — batch push with durability ACKs (classic cluster only)
     ├── transformations/              # API SDP pipeline source (raw .py, NOT notebooks); pipeline globs ../../src/transformations/**
     │   ├── bronze_api_responses.py   #   streaming read from landing table (+ response_variant VARIANT via try_parse_json)
     │   ├── silver_api_records.py     #   records shape (default): JSON parse + explode + quality; guards on silver_shape=="records"
     │   ├── silver_api_documents.py   #   document shape: one VARIANT row per response, keyed (endpoint, run_id); guards on silver_shape=="document"
     │   └── gold_api_metrics.py       #   2 MVs: endpoint health (bronze), daily counts (silver, follows silver_shape)
-    └── files/                        # FILES SDP pipeline source; pipeline globs ../../src/files/** (sibling of transformations/, so API glob never picks it up)
-        ├── bronze_cloud_files.py     #   Auto Loader cloudFiles stream from a UC Volume + file lineage
-        ├── silver_cloud_files.py     #   quality (rescued-data) + optional dedup_keys
-        └── gold_cloud_files.py       #   2 MVs: ingestion health, rows/day
+    ├── files/                        # FILES SDP pipeline source; pipeline globs ../../src/files/** (sibling of transformations/, so API glob never picks it up)
+    │   ├── bronze_cloud_files.py     #   Auto Loader cloudFiles stream from a UC Volume + file lineage
+    │   ├── silver_cloud_files.py     #   quality (rescued-data) + optional dedup_keys
+    │   └── gold_cloud_files.py       #   2 MVs: ingestion health, rows/day
+    └── zerobus/                       # ZEROBUS SDP pipeline source; pipeline globs ../../src/zerobus/**
+        ├── silver_zerobus_events.py   #   wire BIGINT micros -> TIMESTAMP, AUTO CDC SCD1 on event_id (at-least-once dedup)
+        └── gold_zerobus_metrics.py    #   2 MVs: ingestion health (duplicate_rate from bronze), events/day by device
 ```
 
 ## Current status
@@ -173,15 +180,33 @@ yaif/
     in its header + README "Adding the files module".
   - `src/files/**` is globbed by the files pipeline; keep non-pipeline code (the seeder)
     in `src/jobs/`, never under `src/files/`.
+- ✅ **Zerobus module (streaming push): built & verified end-to-end** (2026-08-31, workspace
+  `dbc-ea097edd-802e`). Demo `resources/zerobus/demo.yml`: SDK producer pushes synthetic
+  IoT events into a pre-created bronze table with durability ACKs; SDP medallion
+  (`src/zerobus/`) dedups at-least-once re-deliveries via AUTO CDC SCD1 on `event_id`.
+  The producer streams ~1,000 records over 5 minutes by default
+  (`zerobus_stream_minutes=5`, ~10s cadence, mid-flight re-deliveries from a bounded
+  recent-events pool); `=0` is a fast single batch. Verified across three runs:
+  bronze arrivals exactly track pushes (re-deliveries included), silver converges to
+  the distinct event count (AUTO CDC SCD1), `duplicate_rate` matches the injected ~2%.
+  The notebook's `ZerobusProducer` class is plain Python (no dbutils/Spark) — the
+  copyable client for a real producer.
+  One-time prereqs (SP `yaif-zerobus-producer` + OAuth secret + UC secret scope
+  `yaif_zerobus`) are provisioned on this workspace; `prepare` creates the bronze table +
+  grants the SP. Producer task = classic single-node cluster (SDK can't pip-install on
+  serverless — gotcha #12); Protobuf is the recommended production serialization
+  (see `docs/zerobus.md`). Run: `databricks bundle run zerobus_demo_push_and_pipeline -t dev`.
 
 ## Environment / how to test
 
-- **Default workspace = the SANDBOX.** Both `dev` and `prod` targets point at the
-  sandbox via profile `sqlserver-ws` (https://dbc-f9cc83ac-844b.cloud.databricks.com),
-  catalog `yaif` (the `var.catalog` default). The sandbox is a UC-enabled workspace with
-  serverless jobs + pipelines and the `yaif` catalog already created; the live SQL Server
-  Lakeflow gateway also lives there (deployed out-of-band; kept as `examples/`, not in the
-  deploy glob — do not redeploy/touch it). Point at a different workspace by editing
+- **Default workspace = profile `dbc-ea097edd-802e`** (us-west-2; host lives in
+  `~/.databrickscfg`, not committed — repo convention), catalog `yaif` (the
+  `var.catalog` default) — a UC-enabled workspace with serverless jobs + pipelines. This replaced the earlier
+  sandbox (profile `sqlserver-ws` = dbc-f9cc83ac-844b), which has been RETIRED — the SQL
+  Server gateway that lived there is gone with it (the `examples/sqlserver/` templates
+  remain valid; re-verify them on a workspace that has the UC connection). The zerobus
+  module's one-time prereqs (SP `yaif-zerobus-producer` + OAuth secret + UC secret scope
+  `yaif_zerobus`) are set up in this workspace. Point at a different workspace by editing
   `databricks.yml` or overriding per command with `--profile <name> --var catalog=<cat>`.
   Dev mode prefixes schemas as `dev_<user>_<schema>`.
 - **Demo connection** must exist in the target workspace before the first API run:
@@ -271,6 +296,21 @@ yaif/
 11. **`.transform()` needs no SDP plumbing** — it is plain PySpark `DataFrame` API and
     works inside `@dp.table` / `@dp.temporary_view` today. Only *cross-directory imports*
     need `root_path` (#10). Don't conflate the two: an in-file helper needs nothing.
+12. **Zerobus: the SDK cannot pip-install on serverless** — the producer task must run on
+    a classic job cluster (`num_workers: 0` + `data_security_mode: SINGLE_USER` is the
+    modern single-node recipe). Do NOT add `spark.databricks.cluster.profile: singleNode`
+    to the spark_conf: the Jobs API REJECTS it with 400 `INVALID_PARAMETER_VALUE` when an
+    access mode is set ("Spark Conf: ... is not allowed when choosing an access mode").
+    `databricks bundle validate` still WARNS that single-node needs that conf — cosmetic,
+    deploy works; the cluster is genuinely single-node via `num_workers: 0`.
+13. **Zerobus auth + wire types**: producers authenticate with a service principal that
+    needs EXPLICIT table-level `MODIFY` + `SELECT` (schema-inherited grants fail with
+    error 4024 — the demo's `prepare` task grants them from the secret scope). Delta
+    `TIMESTAMP` travels as int64 epoch MICROSECONDS, so bronze stores
+    `event_time`/`ingested_at` as BIGINT and silver casts them
+    (`src/shared/zerobus_events.py`). Delivery is at-least-once: silver is AUTO CDC SCD1
+    keyed on `event_id`, and `gold_zerobus_ingestion_health.duplicate_rate` is the
+    duplicate-traffic signal.
 
 ## How to onboard a new API domain
 

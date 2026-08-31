@@ -9,12 +9,13 @@ include:
   # (in the same commit that creates the UC SQLSERVER connection).
   - resources/api/*.yml
   - resources/files/*.yml
+  - resources/zerobus/*.yml      # runtime prereq: UC secret scope (see docs/zerobus.md) — deploy is safe without it
   # - resources/sqlserver/*.yml   # uncomment only with a UC SQLSERVER connection in place
 
 variables:
   catalog:
     description: "Unity Catalog for all domain schemas (must exist; schemas are created by the bundle)"
-    # Sandbox workspace (sqlserver-ws / dbc-f9cc83ac-844b) is this repo's test bed; its catalog is 'yaif'.
+    # The test-bed workspace's catalog is 'yaif' (see the targets comment below).
     default: "yaif"
   api_connection:
     description: "UC HTTP connection holding host, base path, and credential (auth_mode=connection domains)"
@@ -48,6 +49,22 @@ variables:
   file_format:
     description: "Auto Loader source format for the files module (parquet | csv | json | avro)"
     default: "parquet"
+  # --- zerobus module (streaming push) — demo deploys anywhere; the PUSH task needs the scope ---
+  zerobus_secret_scope:
+    description: "UC secret scope holding the Zerobus producer service principal's OAuth credentials (keys: client_id, client_secret). Created out-of-band; see docs/zerobus.md."
+    default: "yaif_zerobus"
+  zerobus_server_endpoint:
+    description: "Zerobus server endpoint for the workspace: <workspace-id>.zerobus.<region>.cloud.databricks.com (Azure: .azuredatabricks.net). Override when targeting a different workspace."
+    default: "7474648509963227.zerobus.us-west-2.cloud.databricks.com"
+  zerobus_event_count:
+    description: "Synthetic events per demo push"
+    default: "1000"
+  zerobus_duplicate_pct:
+    description: "Percent of events re-delivered by the demo producer, to exercise at-least-once dedup in silver"
+    default: "2"
+  zerobus_stream_minutes:
+    description: "Demo producer mode: >0 streams ~zerobus_event_count records over that many minutes (~10s cadence); 0 pushes one batch (fast verify)"
+    default: "5"
   # --- SQL Server module — used only once examples/sqlserver/*.yml is activated ---
   sqlserver_connection:
     description: "Name of the UC SQLSERVER connection Lakeflow Connect uses (created out-of-band)"
@@ -62,21 +79,25 @@ targets:
   # schedules accordingly — so there are NO per-pipeline `development:` overrides here.
   # Onboarding a domain is a pure file copy into resources/*/*.yml with zero databricks.yml churn.
   #
-  # Both targets point at the SANDBOX workspace (profile `sqlserver-ws` =
-  # https://dbc-f9cc83ac-844b.cloud.databricks.com, catalog `yaif`) — this repo's
-  # everything-on-the-sandbox test bed. The SQL Server Lakeflow gateway also lives in
-  # this workspace (deployed out-of-band; kept as examples/, not in the deploy glob).
+  # Both targets point at the current test-bed workspace (profile `dbc-ea097edd-802e`,
+  # us-west-2, catalog `yaif`). This replaced the earlier sandbox (profile
+  # `sqlserver-ws`), which has been retired — the SQL Server gateway that lived there is
+  # gone with it; the sqlserver examples remain out-of-glob templates. Per repo
+  # convention, workspace hosts/ids are NOT committed — the profile name in
+  # ~/.databrickscfg is the only place the host is wired (the zerobus_server_endpoint
+  # var default is the one functional exception: the demo cannot reach Zerobus without
+  # it; override it alongside the profile when targeting another workspace).
   # Override per command with `--profile <name>` to target a different workspace.
   dev:
     default: true
     mode: development
     workspace:
-      profile: sqlserver-ws
+      profile: dbc-ea097edd-802e
 
   prod:
     mode: production
     workspace:
-      profile: sqlserver-ws
+      profile: dbc-ea097edd-802e
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
     variables:
       request_concurrency: "32"
