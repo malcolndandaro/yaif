@@ -90,6 +90,9 @@ resources:
               secret_scope: ${var.zerobus_secret_scope}
               event_count: ${var.zerobus_event_count}
               duplicate_pct: ${var.zerobus_duplicate_pct}
+              # >0 streams ~event_count records over that many minutes (~10s cadence)
+              # instead of pushing one batch. 0 = fast single-batch mode.
+              stream_minutes: ${var.zerobus_stream_minutes}
           # Task-level: the Zerobus SDK cannot pip-install on serverless, so the push
           # task carries it onto the classic job cluster (prepare doesn't import it).
           libraries:

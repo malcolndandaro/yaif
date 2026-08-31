@@ -184,8 +184,13 @@ yaif/
   `dbc-ea097edd-802e`). Demo `resources/zerobus/demo.yml`: SDK producer pushes synthetic
   IoT events into a pre-created bronze table with durability ACKs; SDP medallion
   (`src/zerobus/`) dedups at-least-once re-deliveries via AUTO CDC SCD1 on `event_id`.
-  Verified: bronze 1,020 wire arrivals (1,000 events + 2% injected re-deliveries) ->
-  silver exactly 1,000; `gold_zerobus_ingestion_health.duplicate_rate` = 0.0196.
+  The producer streams ~1,000 records over 5 minutes by default
+  (`zerobus_stream_minutes=5`, ~10s cadence, mid-flight re-deliveries from a bounded
+  recent-events pool); `=0` is a fast single batch. Verified across three runs:
+  bronze arrivals exactly track pushes (re-deliveries included), silver converges to
+  the distinct event count (AUTO CDC SCD1), `duplicate_rate` matches the injected ~2%.
+  The notebook's `ZerobusProducer` class is plain Python (no dbutils/Spark) — the
+  copyable client for a real producer.
   One-time prereqs (SP `yaif-zerobus-producer` + OAuth secret + UC secret scope
   `yaif_zerobus`) are provisioned on this workspace; `prepare` creates the bronze table +
   grants the SP. Producer task = classic single-node cluster (SDK can't pip-install on

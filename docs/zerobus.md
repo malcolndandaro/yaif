@@ -63,11 +63,13 @@ on the catalog.
 databricks bundle run zerobus_demo_push_and_pipeline -t dev
 ```
 
-`prepare` → creates the bronze table + grants · `push` → generates ~1,000 synthetic IoT
-events (~2% re-delivered `event_id`s, to exercise at-least-once dedup) and pushes them
-through the SDK with durability ACKs · `run_pipeline` → the SDP medallion. The push task
-runs on a **classic single-node job cluster** because the Zerobus SDK cannot pip-install
-on serverless; everything downstream is serverless as usual.
+`prepare` → creates the bronze table + grants · `push` → the producer (a **5-minute
+stream** by default: ~1,000 synthetic IoT events at a ~10s cadence, ~2% re-delivered
+mid-flight to exercise at-least-once dedup, then flush and close) · `run_pipeline` → the
+SDP medallion. The push task runs on a **classic single-node job cluster** because the
+Zerobus SDK cannot pip-install on serverless; everything downstream is serverless as
+usual. For a fast single-batch run (e.g. re-verification), pass
+`--var zerobus_stream_minutes=0`.
 
 Verify:
 
@@ -84,10 +86,11 @@ SELECT * FROM <catalog>.yaif_zerobus_demo.gold_zerobus_ingestion_health;  -- dup
 1. **Give the producer the identity**: the SP's `client_id`/`client_secret` from the
    scope (or its own SP, granted the same way), plus the server endpoint
    `<workspace-id>.zerobus.<region>.cloud.databricks.com` and the target table name.
-2. **Swap the record generation** in `src/jobs/push_zerobus_events.py` for your own —
-   the rest of that notebook (stream open, ACK batch, retry posture) is the template.
-   For a producer outside Databricks, copy the SDK calls verbatim; it is a plain
-   Python/Rust/Go/Java/TypeScript library.
+2. **Copy the `ZerobusProducer` class** out of `src/jobs/push_zerobus_events.py` — it is
+   plain Python (no dbutils, no Spark): open the stream, `push(records)` blocks on the
+   durability ACK, the context manager flushes and closes. Swap the demo-events cell for
+   your real records and the notebook is your producer. For a producer outside
+   Databricks, the same class works verbatim (or use the Rust/Go/Java/TypeScript SDKs).
 3. **Prefer Protobuf in production** — generate the `.proto` from the UC table
    (`python -m zerobus.tools.generate_proto --uc-endpoint … --table …`) and pass
    `RecordType.PROTO` + the compiled descriptor to `TableProperties`. JSON (the demo)

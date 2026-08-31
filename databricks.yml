@@ -62,6 +62,9 @@ variables:
   zerobus_duplicate_pct:
     description: "Percent of events re-delivered by the demo producer, to exercise at-least-once dedup in silver"
     default: "2"
+  zerobus_stream_minutes:
+    description: "Demo producer mode: >0 streams ~zerobus_event_count records over that many minutes (~10s cadence); 0 pushes one batch (fast verify)"
+    default: "5"
   # --- SQL Server module — used only once examples/sqlserver/*.yml is activated ---
   sqlserver_connection:
     description: "Name of the UC SQLSERVER connection Lakeflow Connect uses (created out-of-band)"
